@@ -50,6 +50,24 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     
+    # MinIO Settings (Object Storage)
+    MINIO_ENDPOINT: str
+    MINIO_ACCESS_KEY: str
+    MINIO_SECRET_KEY: str
+    MINIO_BUCKET_NAME: str = "jvb-documents"
+    MINIO_SECURE: bool = False
+    
+    # Qdrant Settings (Vector Database)
+    QDRANT_HOST: str = "qdrant"
+    QDRANT_PORT: int = 6333
+    QDRANT_COLLECTION_NAME: str = "jvb_embeddings"
+    QDRANT_API_KEY: Optional[str] = None
+    
+    # Cohere Settings (Embeddings)
+    COHERE_API_KEY: str
+    COHERE_EMBEDDING_MODEL: str = "embed-multilingual-v3.0"
+    VECTOR_DIMENSION: int = 1024
+    
     def get_cors_origins(self) -> list[str]:
         """Convert CORS_ORIGINS string to list"""
         if isinstance(self.CORS_ORIGINS, list):

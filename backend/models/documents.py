@@ -50,13 +50,14 @@ class DocumentChunk(BaseModel):
 
 
 class DocumentEmbedding(BaseModel):
-    """Bảng lưu trữ vector embeddings cho các chunks"""
+    """Bảng lưu trữ metadata của embeddings - Vector thực tế lưu trong Qdrant"""
     __tablename__ = "document_embeddings"
 
     chunk_id = Column(UUID(as_uuid=True), ForeignKey("document_chunks.id", ondelete="CASCADE"), nullable=False, unique=True)
     document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
-    embedding = Column(JSON, nullable=False)  # Lưu vector dưới dạng JSON hoặc có thể dùng pgvector
-    embedding_model = Column(String(100), nullable=False, default="text-embedding-3-small")
+    qdrant_point_id = Column(String(255), nullable=False, index=True)  # ID của point trong Qdrant
+    embedding_model = Column(String(100), nullable=False, default="embed-multilingual-v3.0")
+    vector_dimension = Column(Integer, nullable=False, default=1024)  # Cohere embed-multilingual-v3.0 = 1024 dims
 
     # Relationships
     chunk = relationship("DocumentChunk", back_populates="embedding")

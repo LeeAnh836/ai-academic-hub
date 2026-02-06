@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.databases import init_db, close_db
 from core.redis import redis_blacklist
+from core.minio import minio_client
+from core.qdrant import qdrant_client
 from services.token_service import token_service
 from services.user_presence import user_presence
 from api.auth import router as auth_router
@@ -30,9 +32,13 @@ async def lifespan(app: FastAPI):
     await init_db()
     await redis_blacklist.connect()
     await user_presence.connect()
+    await minio_client.connect()
+    await qdrant_client.connect()
     print("✅ Database initialized")
     print("✅ Redis blacklist connected")
     print("✅ User presence tracker connected")
+    print("✅ MinIO connected")
+    print("✅ Qdrant connected")
     
     yield
     
@@ -40,6 +46,8 @@ async def lifespan(app: FastAPI):
     print("🛑 Shutting down application...")
     await user_presence.disconnect()
     await redis_blacklist.disconnect()
+    await minio_client.disconnect()
+    await qdrant_client.disconnect()
     await close_db()
     print("✅ Resources cleaned up")
 

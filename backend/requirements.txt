@@ -1,22 +1,44 @@
+# FastAPI Core
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Database
 sqlalchemy==2.0.23
 psycopg2-binary==2.9.9
-pydantic==2.5.0
-pydantic-settings==2.1.0
-python-jose[cryptography]==3.3.0
-bcrypt==4.1.2
-python-multipart==0.0.6
-redis==5.0.1
-cryptography==41.0.7
-PyJWT==2.8.0
+
+# Validation
+pydantic==2.10.5
+pydantic-settings==2.7.1
 email-validator==2.1.0
-# Cần bổ sung:
-minio                    # Kết nối MinIO
-qdrant-client            # Kết nối Qdrant
-langchain                # Framework xử lý RAG
-langchain-community      # Thêm loaders
-openai                   # Hoặc embedding model khác
-pypdf                    # Đọc PDF
-python-docx              # Đọc DOCX
-tiktoken                 # Đếm tokens
+
+# Authentication & Security
+python-jose[cryptography]==3.3.0
+PyJWT==2.8.0
+bcrypt==4.1.2
+cryptography==41.0.7
+
+# Redis
+redis==5.0.1
+
+# MinIO - Object Storage
+minio==7.2.0
+
+# Qdrant - Vector Database
+qdrant-client==1.7.0
+
+# Cohere - Embeddings
+cohere>=5.11.0
+
+# LangChain - Document Processing  
+langchain>=0.3.0
+langchain-community>=0.3.0
+langchain-cohere>=0.3.0
+
+# Document Loaders
+pypdf==3.17.1
+python-docx==1.1.0
+openpyxl==3.1.2
+
+# Text Processing
+tiktoken==0.5.2
