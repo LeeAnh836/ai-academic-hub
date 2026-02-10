@@ -3,6 +3,9 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 
+# HTTP Client (to call AI Service)
+httpx==0.26.0
+
 # Database
 sqlalchemy==2.0.23
 psycopg2-binary==2.9.9
@@ -24,21 +27,5 @@ redis==5.0.1
 # MinIO - Object Storage
 minio==7.2.0
 
-# Qdrant - Vector Database
-qdrant-client==1.7.0
-
-# Cohere - Embeddings
-cohere>=5.11.0
-
-# LangChain - Document Processing  
-langchain>=0.3.0
-langchain-community>=0.3.0
-langchain-cohere>=0.3.0
-
-# Document Loaders
-pypdf==3.17.1
-python-docx==1.1.0
-openpyxl==3.1.2
-
-# Text Processing
-tiktoken==0.5.2
+# Note: AI processing dependencies (Cohere, LangChain, etc.) 
+# are now in ai-service/requirements.txt

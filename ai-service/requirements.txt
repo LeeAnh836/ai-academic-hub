@@ -1,0 +1,31 @@
+# AI Service Dependencies
+
+# FastAPI và ASGI server
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# Pydantic settings
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Qdrant vector database client
+qdrant-client==1.7.3
+
+# Cohere API client
+cohere==4.47
+
+# LangChain core và loaders
+langchain==0.1.6
+langchain-community==0.0.20
+
+# Document loaders dependencies
+pypdf==4.0.1
+docx2txt==0.8
+python-docx==1.1.0
+
+# HTTP client
+httpx==0.26.0
+
+# Utilities
+python-dotenv==1.0.0

@@ -65,6 +65,26 @@ class MessageFeedbackRequest(BaseModel):
         }
 
 
+class ChatAskRequest(BaseModel):
+    """Schema cho request hỏi AI trong chat session"""
+    question: str = Field(..., min_length=1, max_length=5000)
+    document_ids: Optional[List[str]] = Field(default=None, description="Filter theo document IDs")
+    top_k: int = Field(default=5, ge=1, le=20)
+    score_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    temperature: Optional[float] = Field(default=0.7, ge=0.0, le=1.0)
+    max_tokens: Optional[int] = Field(default=2000, ge=100, le=8000)
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "question": "Tài liệu này nói về gì?",
+                "document_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+                "top_k": 5,
+                "score_threshold": 0.5
+            }
+        }
+
+
 # ============================================
 # Response Schemas
 # ============================================
@@ -147,6 +167,47 @@ class ChatSessionDetailResponse(ChatSessionResponse):
 
     class Config:
         from_attributes = True
+
+
+class ContextChunkResponse(BaseModel):
+    """Schema cho context chunk từ RAG"""
+    chunk_id: str
+    document_id: str
+    chunk_text: str
+    chunk_index: int
+    score: float
+    file_name: str
+    title: Optional[str] = None
+
+
+class ChatAskResponse(BaseModel):
+    """Schema cho response hỏi AI trong chat session"""
+    session_id: UUID
+    user_message: ChatMessageResponse
+    ai_message: ChatMessageResponse
+    contexts: List[ContextChunkResponse]
+    processing_time: float
+    model_used: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "session_id": "550e8400-e29b-41d4-a716-446655440000",
+                "user_message": {
+                    "id": "550e8400-e29b-41d4-a716-446655440001",
+                    "role": "user",
+                    "content": "Tài liệu này nói về gì?"
+                },
+                "ai_message": {
+                    "id": "550e8400-e29b-41d4-a716-446655440002",
+                    "role": "assistant",
+                    "content": "Tài liệu này nói về lập trình Java..."
+                },
+                "contexts": [],
+                "processing_time": 2.5,
+                "model_used": "command-r7b-12-2024"
+            }
+        }
 
 
 class AIUsageResponse(BaseModel):

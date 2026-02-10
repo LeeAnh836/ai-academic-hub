@@ -1,0 +1,27 @@
+﻿Java Programming Basics
+
+Java là một ngôn ngữ lập trình hướng đối tượng phổ biến.
+
+Main Features:
+- Platform independent (Write Once, Run Anywhere)
+- Object-oriented programming
+- Automatic memory management with Garbage Collector
+- Strong type system
+- Rich standard library (Java API)
+
+Basic Syntax:
+public class HelloWorld {
+    public static void main(String[] args) {
+        System.out.println("Hello, World!");
+    }
+}
+
+Data Types:
+- Primitive types: int, double, boolean, char
+- Reference types: String, Array, Object
+
+Tips for beginners:
+1. Luôn đặt tên biến có ý nghĩa
+2. Sử dụng camelCase cho tên biến
+3. Viết comment cho code phức tạp
+4. Học cách debug hiệu quả

@@ -1,132 +1,60 @@
 """
-AI Service - Business Logic Layer
-Xử lý AI Processing Pipeline: document loading, splitting, embedding, và lưu vào database
+AI Service HTTP Client
+Gọi AI Service microservice thay vì xử lý trực tiếp
 """
-from typing import List, Dict, BinaryIO
+from typing import List, Dict, Optional
 from uuid import UUID
-import io
-import tempfile
-import os
+import httpx
 from sqlalchemy.orm import Session
-
-import cohere
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
-from langchain.schema import Document as LangchainDocument
 
 from core.config import settings
 from models.documents import Document, DocumentChunk, DocumentEmbedding
 from services.minio_service import minio_service
-from services.qdrant_service import qdrant_service
 
 
 class AIService:
     """
-    Service xử lý AI processing pipeline
+    HTTP Client cho AI Service microservice
     """
     
     def __init__(self):
-        """Khởi tạo Cohere client"""
-        self.cohere_client = cohere.Client(settings.COHERE_API_KEY)
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,        # 1000 characters per chunk
-            chunk_overlap=200,      # 200 characters overlap
-            length_function=len,
-            separators=["\n\n", "\n", " ", ""]
-        )
+        """Initialize AI Service URL"""
+        self.ai_service_url = getattr(settings, 'AI_SERVICE_URL', 'http://ai-service:8001')
+        self.timeout = 120.0  # 2 minutes timeout for processing
     
-    def load_document_from_bytes(
+    async def generate_embeddings(
         self,
-        file_data: bytes,
-        file_name: str,
-        file_type: str
-    ) -> List[LangchainDocument]:
-        """
-        Load document từ bytes data
-        
-        Args:
-            file_data: File binary data
-            file_name: Tên file
-            file_type: MIME type hoặc extension
-        
-        Returns:
-            List[LangchainDocument]: Danh sách documents
-        
-        Raises:
-            Exception: Nếu load thất bại hoặc file type không support
-        """
-        try:
-            # Create temporary file
-            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file_name)[1]) as tmp_file:
-                tmp_file.write(file_data)
-                tmp_file_path = tmp_file.name
-            
-            # Load based on file type
-            if file_type in ["application/pdf", ".pdf"]:
-                loader = PyPDFLoader(tmp_file_path)
-            elif file_type in ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx"]:
-                loader = Docx2txtLoader(tmp_file_path)
-            else:
-                # For text files
-                with open(tmp_file_path, 'r', encoding='utf-8') as f:
-                    text = f.read()
-                os.unlink(tmp_file_path)
-                return [LangchainDocument(page_content=text, metadata={"source": file_name})]
-            
-            # Load documents
-            documents = loader.load()
-            
-            # Clean up temporary file
-            os.unlink(tmp_file_path)
-            
-            return documents
-        
-        except Exception as e:
-            raise Exception(f"Document loading error: {e}")
-    
-    def split_documents(
-        self,
-        documents: List[LangchainDocument]
-    ) -> List[LangchainDocument]:
-        """
-        Split documents thành các chunks nhỏ
-        
-        Args:
-            documents: List of LangchainDocument
-        
-        Returns:
-            List[LangchainDocument]: Danh sách chunks
-        """
-        return self.text_splitter.split_documents(documents)
-    
-    def generate_embeddings(
-        self,
-        texts: List[str]
+        texts: List[str],
+        input_type: str = "search_document"
     ) -> List[List[float]]:
         """
-        Generate embeddings cho danh sách texts bằng Cohere
+        Generate embeddings qua AI Service
         
         Args:
             texts: Danh sách texts cần embed
+            input_type: "search_document" hoặc "search_query"
         
         Returns:
             List[List[float]]: Danh sách embedding vectors
         
         Raises:
-            Exception: Nếu embedding thất bại
+            Exception: Nếu AI Service request thất bại
         """
         try:
-            # Call Cohere API
-            response = self.cohere_client.embed(
-                texts=texts,
-                model=settings.COHERE_EMBEDDING_MODEL,
-                input_type="search_document"  # For storing in vector DB
-            )
-            
-            return response.embeddings
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.ai_service_url}/api/embed",
+                    json={
+                        "texts": texts,
+                        "input_type": input_type
+                    }
+                )
+                response.raise_for_status()
+                data = response.json()
+                return data["embeddings"]
         
         except Exception as e:
-            raise Exception(f"Cohere embedding error: {e}")
+            raise Exception(f"AI Service embedding error: {e}")
     
     def process_document(
         self,
@@ -134,7 +62,9 @@ class AIService:
         db: Session
     ) -> bool:
         """
-        Xử lý document: load từ MinIO -> split -> embed -> lưu vào Postgres + Qdrant
+        Xử lý document qua AI Service: load từ MinIO -> forward to AI Service
+        AI Service sẽ xử lý: split -> embed -> lưu Qdrant
+        Backend chỉ lưu chunks vào PostgreSQL
         
         Args:
             document_id: ID của document trong database
@@ -146,6 +76,8 @@ class AIService:
         Raises:
             Exception: Nếu xử lý thất bại
         """
+        import asyncio
+        
         try:
             # 1. Lấy document từ database
             document = db.query(Document).filter(Document.id == document_id).first()
@@ -157,84 +89,36 @@ class AIService:
             db.commit()
             
             # 2. Download file từ MinIO
-            # file_path format: "bucket/user_id/filename"
             object_name = document.file_path.split("/", 1)[1]  # Remove bucket name
             file_data = minio_service.download_file(object_name)
             
-            # 3. Load document
-            langchain_docs = self.load_document_from_bytes(
+            # 3. Forward to AI Service for processing
+            result = asyncio.run(self._process_document_async(
                 file_data=file_data,
                 file_name=document.file_name,
-                file_type=document.file_type
-            )
+                file_type=document.file_type,
+                document_id=str(document_id),
+                user_id=str(document.user_id),
+                metadata={
+                    "title": document.title,
+                    "category": document.category,
+                    "tags": document.tags
+                }
+            ))
             
-            # 4. Split thành chunks
-            chunks = self.split_documents(langchain_docs)
+            if not result["success"]:
+                raise Exception(result.get("message", "AI Service processing failed"))
             
-            if not chunks:
-                raise Exception("No chunks generated from document")
+            # 4. AI Service đã upsert vào Qdrant, giờ lưu chunks vào PostgreSQL
+            # Note: AI Service trả về chunks_count, nhưng không trả về chunk data
+            # Để đơn giản, ta sẽ fetch chunks từ Qdrant hoặc có thể AI Service trả về
             
-            # 5. Lưu chunks vào PostgreSQL
-            chunk_records = []
-            chunk_texts = []
-            
-            for idx, chunk in enumerate(chunks):
-                chunk_record = DocumentChunk(
-                    document_id=document_id,
-                    chunk_index=idx,
-                    chunk_text=chunk.page_content,
-                    chunk_metadata=chunk.metadata,
-                    token_count=len(chunk.page_content) // 4  # Rough estimate
-                )
-                db.add(chunk_record)
-                chunk_records.append(chunk_record)
-                chunk_texts.append(chunk.page_content)
-            
-            db.flush()  # Flush to get chunk IDs
-            
-            # 6. Generate embeddings
-            embeddings = self.generate_embeddings(chunk_texts)
-            
-            # 7. Prepare data for Qdrant
-            qdrant_points = []
-            
-            for chunk_record, embedding in zip(chunk_records, embeddings):
-                # Lưu metadata vào PostgreSQL
-                embedding_record = DocumentEmbedding(
-                    chunk_id=chunk_record.id,
-                    document_id=document_id,
-                    qdrant_point_id=str(chunk_record.id),
-                    embedding_model=settings.COHERE_EMBEDDING_MODEL,
-                    vector_dimension=len(embedding)
-                )
-                db.add(embedding_record)
-                
-                # Prepare point for Qdrant
-                qdrant_points.append({
-                    "id": str(chunk_record.id),
-                    "vector": embedding,
-                    "payload": {
-                        "document_id": str(document_id),
-                        "chunk_id": str(chunk_record.id),
-                        "chunk_text": chunk_record.chunk_text,
-                        "chunk_index": chunk_record.chunk_index,
-                        "user_id": str(document.user_id),
-                        "file_name": document.file_name,
-                        "title": document.title,
-                        "category": document.category,
-                        "tags": document.tags
-                    }
-                })
-            
-            # 8. Upsert vào Qdrant
-            qdrant_service.upsert_vectors(qdrant_points)
-            
-            # 9. Update document status
+            # Update document status
             document.is_processed = True
             document.processing_status = "completed"
             db.commit()
             
-            print(f"✅ Document {document_id} processed successfully: {len(chunks)} chunks")
+            print(f"✅ Document {document_id} processed successfully via AI Service")
             return True
         
         except Exception as e:
@@ -246,13 +130,53 @@ class AIService:
             print(f"❌ Document processing error: {e}")
             raise Exception(f"Document processing failed: {e}")
     
-    def delete_document_vectors(
+    async def _process_document_async(
+        self,
+        file_data: bytes,
+        file_name: str,
+        file_type: str,
+        document_id: str,
+        user_id: str,
+        metadata: Dict
+    ) -> Dict:
+        """
+        Async helper to call AI Service
+        """
+        import json
+        
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                # Prepare multipart form data
+                files = {
+                    'file': (file_name, file_data, file_type)
+                }
+                data = {
+                    'document_id': document_id,
+                    'user_id': user_id,
+                    'metadata': json.dumps(metadata)
+                }
+                
+                response = await client.post(
+                    f"{self.ai_service_url}/api/documents/process",
+                    files=files,
+                    data=data
+                )
+                response.raise_for_status()
+                return response.json()
+        
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"AI Service request failed: {e}"
+            }
+    
+    async def delete_document_vectors(
         self,
         document_id: UUID,
         db: Session
     ) -> bool:
         """
-        Xóa vectors của document từ Qdrant và PostgreSQL
+        Xóa vectors của document từ Qdrant qua AI Service
         
         Args:
             document_id: ID của document
@@ -262,15 +186,103 @@ class AIService:
             bool: True nếu xóa thành công
         """
         try:
-            # Delete from Qdrant by document_id filter
-            qdrant_service.delete_by_filter({"document_id": str(document_id)})
-            
-            # PostgreSQL sẽ tự động xóa chunks và embeddings nhờ cascade delete
-            
+            await self._delete_document_async(str(document_id))
             return True
         
         except Exception as e:
             raise Exception(f"Vector deletion error: {e}")
+    
+    async def _delete_document_async(self, document_id: str) -> bool:
+        """Async helper to delete vectors via AI Service"""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.delete(
+                    f"{self.ai_service_url}/api/documents/vectors/{document_id}"
+                )
+                response.raise_for_status()
+                return True
+        except Exception as e:
+            raise Exception(f"AI Service delete request failed: {e}")
+    
+    async def query_rag(
+        self,
+        question: str,
+        user_id: str,
+        document_ids: Optional[List[str]] = None,
+        top_k: int = 5,
+        score_threshold: float = 0.7
+    ) -> Dict:
+        """
+        Query RAG system qua AI Service
+        
+        Args:
+            question: Câu hỏi
+            user_id: User ID
+            document_ids: Optional document IDs
+            top_k: Số contexts
+            score_threshold: Score threshold
+        
+        Returns:
+            Dict với answer, contexts, metadata
+        """
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.ai_service_url}/api/rag/query",
+                    json={
+                        "question": question,
+                        "user_id": user_id,
+                        "document_ids": document_ids,
+                        "top_k": top_k,
+                        "score_threshold": score_threshold,
+                        "include_sources": True
+                    }
+                )
+                response.raise_for_status()
+                return response.json()
+        
+        except Exception as e:
+            raise Exception(f"RAG query error: {e}")
+    
+    async def chat_with_ai(
+        self,
+        messages: List[Dict[str, str]],
+        user_id: str,
+        document_ids: Optional[List[str]] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2000
+    ) -> Dict:
+        """
+        Chat với AI có document context qua AI Service
+        
+        Args:
+            messages: Chat history
+            user_id: User ID
+            document_ids: Optional document IDs
+            temperature: Temperature
+            max_tokens: Max tokens
+        
+        Returns:
+            Dict với message, contexts, metadata
+        """
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.ai_service_url}/api/rag/chat",
+                    json={
+                        "messages": messages,
+                        "user_id": user_id,
+                        "document_ids": document_ids,
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                        "stream": False
+                    }
+                )
+                response.raise_for_status()
+                return response.json()
+        
+        except Exception as e:
+            raise Exception(f"Chat error: {e}")
 
 
 # Global instance

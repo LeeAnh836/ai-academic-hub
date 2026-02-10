@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     COHERE_EMBEDDING_MODEL: str = "embed-multilingual-v3.0"
     VECTOR_DIMENSION: int = 1024
     
+    # AI Service URL (Microservice)
+    AI_SERVICE_URL: str = "http://ai-service:8001"
+    
     def get_cors_origins(self) -> list[str]:
         """Convert CORS_ORIGINS string to list"""
         if isinstance(self.CORS_ORIGINS, list):

@@ -1,0 +1,6 @@
+﻿{
+  "question": "Java có những kiểu dữ liệu primitive nào?",
+  "document_ids": ["f9ba8a43-d96f-487f-b7b1-4ab36b45c2a4"],
+  "top_k": 3,
+  "score_threshold": 0.3
+}

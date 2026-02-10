@@ -334,10 +334,7 @@ async def delete_document(
     try:
         # 1. Delete vectors from Qdrant (if processed)
         if document.is_processed:
-            ai_service.delete_document_vectors(document_id, db)
-        
-        # 2. Delete file from MinIO
-        object_name = document.file_path.split("/", 1)[1]  # Remove bucket name
+            await ai_service.delete_document_vectors(document_id, db)
         minio_service.delete_file(object_name)
         
         # 3. Delete from PostgreSQL (cascade will delete chunks & embeddings)

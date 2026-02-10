@@ -59,6 +59,27 @@ services:
         condition: service_started
       qdrant:
         condition: service_started
+      ai-service:
+        condition: service_started
+    networks:
+      - jvb_network
+
+  # AI Service (Microservice)
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: jvb_ai_service
+    command: uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+    ports:
+      - "8001:8001"
+    env_file:
+      - ./ai-service/.env
+    volumes:
+      - ./ai-service:/app
+    depends_on:
+      qdrant:
+        condition: service_started
     networks:
       - jvb_network
 
