@@ -72,7 +72,7 @@ async def login(
     Returns:
         Token pair
     """
-    result = auth_service.login_user(
+    result = await auth_service.login_user(
         email=request.email,
         password=request.password,
         db=db
@@ -127,24 +127,30 @@ async def refresh(
 # ============================================
 @router.post("/logout", response_model=MessageResponse)
 async def logout(
-    request: LogoutRequest,
     current_user: User = Depends(get_current_user),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ):
     """
     Logout - thêm tokens vào blacklist
     
+    Tự động lấy access_token từ header Authorization.
+    Không cần gửi gì trong body - chỉ cần có Bearer token trong header.
+    
     Args:
-        request: LogoutRequest schema
-        current_user: Current user
+        current_user: Current user (tự động lấy từ token)
+        credentials: HTTPAuthorizationCredentials chứa access_token
         db: Database session
     
     Returns:
         Success message
     """
+    # Lấy access_token từ header Authorization
+    access_token = credentials.credentials
+    
     await auth_service.logout_user(
-        access_token=request.access_token,
-        refresh_token=request.refresh_token,
+        access_token=access_token,
+        refresh_token=None,
         user_id=str(current_user.id)
     )
     

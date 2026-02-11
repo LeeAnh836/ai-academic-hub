@@ -44,7 +44,7 @@ class AuthService:
                 detail="Invalid authentication token"
             )
         
-        # Check if token is blacklisted
+        # Check if token is blacklisted - QUAN TRỌNG: Không bỏ qua lỗi!
         try:
             is_blacklisted = await token_service.is_token_blacklisted(token)
             if is_blacklisted:
@@ -52,8 +52,16 @@ class AuthService:
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Token has been revoked"
                 )
-        except Exception:
-            pass  # If blacklist check fails, continue
+        except HTTPException:
+            # Re-raise HTTPException (token bị revoked)
+            raise
+        except Exception as e:
+            # Nếu Redis có lỗi -> KHÔNG cho phép truy cập (fail-secure)
+            print(f"Blacklist check failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Authentication service temporarily unavailable"
+            )
         
         # Get user from database
         user = db.query(User).filter(User.id == payload.get("user_id")).first()
@@ -162,7 +170,7 @@ class AuthService:
         }
     
     @staticmethod
-    def login_user(
+    async def login_user(
         email: str,
         password: str,
         db: Session
@@ -212,8 +220,8 @@ class AuthService:
         db.commit()
         db.refresh(user)
         
-        # Tạo token pair
-        tokens = token_service.create_token_pair({
+        # Tạo token pair và store mapping trong Redis
+        tokens = await token_service.create_token_pair({
             "user_id": str(user.id),
             "email": user.email,
             "username": user.username,
@@ -227,15 +235,15 @@ class AuthService:
     @staticmethod
     async def logout_user(
         access_token: str,
-        refresh_token: str,
+        refresh_token: Optional[str],
         user_id: str
     ) -> bool:
         """
-        Logout user - blacklist tokens và mark offline
+        Logout user - blacklist cả access và refresh tokens (nếu còn hạn) và mark offline
         
         Args:
             access_token: Access token cần blacklist
-            refresh_token: Refresh token cần blacklist
+            refresh_token: Refresh token (không dùng - tự động lấy từ Redis)
             user_id: ID của user
         
         Returns:
@@ -245,25 +253,42 @@ class AuthService:
             HTTPException: Nếu có lỗi khi logout
         """
         try:
-            # Xác minh tokens
-            access_payload = token_service.verify_token(access_token, token_type="access")
-            refresh_payload = token_service.verify_token(refresh_token, token_type="refresh")
+            from core.redis import redis_blacklist
             
-            # Lấy expiration time từ payload
-            access_expires_at = datetime.fromtimestamp(access_payload["exp"], tz=timezone.utc)
-            refresh_expires_at = datetime.fromtimestamp(refresh_payload["exp"], tz=timezone.utc)
+            # Blacklist access_token nếu còn hạn
+            try:
+                access_payload = token_service.verify_token(access_token, token_type="access")
+                access_expires_at = datetime.fromtimestamp(access_payload["exp"], tz=timezone.utc)
+                await token_service.blacklist_token(access_token, access_expires_at)
+                print("✅ Access token blacklisted")
+            except HTTPException:
+                # Token hết hạn hoặc invalid - không cần blacklist
+                print("⚠️ Access token expired/invalid - skip blacklist")
+                pass
             
-            # Thêm tokens vào blacklist
-            await token_service.blacklist_token(access_token, access_expires_at)
-            await token_service.blacklist_token(refresh_token, refresh_expires_at)
+            # TỰ động lấy refresh_token từ Redis mapping
+            refresh_token = await redis_blacklist.get_refresh_token(access_token)
+            
+            if refresh_token:
+                # Blacklist refresh_token nếu còn hạn
+                try:
+                    refresh_payload = token_service.verify_token(refresh_token, token_type="refresh")
+                    refresh_expires_at = datetime.fromtimestamp(refresh_payload["exp"], tz=timezone.utc)
+                    await token_service.blacklist_token(refresh_token, refresh_expires_at)
+                    print("✅ Refresh token blacklisted")
+                except HTTPException:
+                    # Token hết hạn hoặc invalid - không cần blacklist
+                    print("⚠️ Refresh token expired/invalid - skip blacklist")
+                    pass
+            else:
+                print("⚠️ No refresh token found in mapping")
             
             # Đánh dấu user offline
             await user_presence.mark_user_offline(user_id)
             
             return True
-        except HTTPException:
-            raise
         except Exception as e:
+            print(f"❌ Logout error: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Logout failed: {str(e)}"

@@ -57,13 +57,11 @@ class RefreshTokenRequest(BaseModel):
 
 class LogoutRequest(BaseModel):
     """Schema cho request logout"""
-    access_token: str
-    refresh_token: str
+    refresh_token: Optional[str] = None
 
     class Config:
         json_schema_extra = {
             "example": {
-                "access_token": "eyJhbGc...",
                 "refresh_token": "eyJhbGc..."
             }
         }

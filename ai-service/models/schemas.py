@@ -61,7 +61,7 @@ class RAGQueryRequest(BaseModel):
     user_id: str = Field(..., description="UUID của user để filter documents")
     document_ids: Optional[List[str]] = Field(default=None, description="Filter theo document IDs cụ thể")
     top_k: int = Field(default=5, description="Số lượng context chunks")
-    score_threshold: float = Field(default=0.7, description="Ngưỡng similarity score")
+    score_threshold: float = Field(default=0.5, description="Ngưỡng similarity score (tự động fallback nếu cần)")
     include_sources: bool = Field(default=True, description="Có trả về sources không")
 
 
@@ -83,6 +83,7 @@ class RAGQueryResponse(BaseModel):
     model: str = Field(..., description="LLM model đã dùng")
     tokens_used: Optional[int] = Field(default=None, description="Số tokens đã sử dụng")
     processing_time: float = Field(..., description="Thời gian xử lý (giây)")
+    query_type: Optional[str] = Field(default="factual", description="Loại câu hỏi: factual/creative/analytical")
 
 
 # ============================================

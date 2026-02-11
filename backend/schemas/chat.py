@@ -16,7 +16,10 @@ class ChatSessionCreateRequest(BaseModel):
     title: Optional[str] = Field(None, max_length=255)
     session_type: str = Field(default="general", pattern="^(general|document_qa)$")
     context_documents: Optional[List[UUID]] = []
-    model_name: str = Field(default="gpt-3.5-turbo")
+    model_name: str = Field(
+        default="auto",
+        description="Model name (auto-selected by AI Service based on intent, this field is for logging only)"
+    )
 
     class Config:
         json_schema_extra = {
@@ -24,7 +27,7 @@ class ChatSessionCreateRequest(BaseModel):
                 "title": "Java Learning Session",
                 "session_type": "document_qa",
                 "context_documents": ["550e8400-e29b-41d4-a716-446655440000"],
-                "model_name": "gpt-4"
+                "model_name": "auto"
             }
         }
 

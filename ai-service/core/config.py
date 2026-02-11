@@ -26,13 +26,33 @@ class Settings(BaseSettings):
     # Cohere Settings (Embeddings & LLM)
     COHERE_API_KEY: str
     COHERE_EMBEDDING_MODEL: str = "embed-multilingual-v3.0"
-    COHERE_LLM_MODEL: str = "command-r-plus"
     VECTOR_DIMENSION: int = 1024
+    
+    # Google Gemini Settings (PRIMARY LLM - FREE)
+    GOOGLE_API_KEY: Optional[str] = None
+    GEMINI_FLASH_MODEL: str = "gemini-1.5-flash-latest"
+    GEMINI_PRO_MODEL: str = "gemini-1.5-pro-latest"
+    
+    # Groq Settings (FALLBACK LLM - FREE)
+    GROQ_API_KEY: Optional[str] = None
+    GROQ_LLAMA_MODEL: str = "llama-3.3-70b-versatile"
+    
+    # Model Selection Strategy
+    PRIMARY_PROVIDER: str = "gemini"  # gemini, groq, cohere
+    FALLBACK_PROVIDER: str = "groq"
+    ENABLE_GEMINI: bool = True
+    ENABLE_GROQ: bool = True
     
     # RAG Settings
     RAG_TOP_K: int = 5
-    RAG_SCORE_THRESHOLD: float = 0.7
+    RAG_SCORE_THRESHOLD: float = 0.5  # Dynamic threshold
+    RAG_MIN_SCORE_THRESHOLD: float = 0.3  # Minimum fallback threshold
     RAG_MAX_CONTEXT_LENGTH: int = 8000
+    RAG_ENABLE_FALLBACK: bool = True  # Enable fallback retrieval
+    
+    # Intent Classification
+    ENABLE_INTENT_CLASSIFICATION: bool = True
+    ENABLE_DIRECT_CHAT: bool = True  # Allow chat without documents
     
     # LLM Settings
     LLM_TEMPERATURE: float = 0.7

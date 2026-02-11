@@ -18,16 +18,23 @@ router = APIRouter(prefix="/api/rag", tags=["rag"])
 @router.post("/query", response_model=RAGQueryResponse)
 async def rag_query(request: RAGQueryRequest):
     """
-    Query RAG system - tìm contexts và generate answer
+    Query RAG system with Multi-Model Orchestrator
+    
+    NEW FEATURES:
+    - Intent classification (direct_chat, rag_query, summarization, etc.)
+    - Multi-model routing (Gemini Flash/Pro, Groq)
+    - Smart fallback strategy
+    - Supports chat without documents
     
     Args:
         request: RAGQueryRequest với question, user_id, filters
     
     Returns:
-        RAGQueryResponse với answer, contexts, metadata
+        RAGQueryResponse với answer, contexts, intent, model used
     """
     try:
-        result = rag_service.query(
+        # Call new orchestrator method
+        result = await rag_service.query_with_orchestrator(
             question=request.question,
             user_id=request.user_id,
             document_ids=request.document_ids,
@@ -46,15 +53,16 @@ async def rag_query(request: RAGQueryRequest):
                 file_name=ctx["file_name"],
                 title=ctx.get("title")
             )
-            for ctx in result["contexts"]
+            for ctx in result.get("contexts", [])
         ]
         
         return RAGQueryResponse(
             answer=result["answer"],
             contexts=contexts,
-            model=result["model"],
-            tokens_used=result["tokens_used"],
-            processing_time=result["processing_time"]
+            model=result.get("model", "unknown"),
+            tokens_used=result.get("tokens_used", 0),
+            processing_time=result.get("processing_time", 0),
+            query_type=result.get("intent", "unknown")
         )
     
     except Exception as e:
@@ -67,25 +75,33 @@ async def rag_query(request: RAGQueryRequest):
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    Chat với AI có context từ documents
+    Chat với AI - Supports both direct chat and RAG
+    
+    NEW: Can work WITHOUT documents for general questions/homework
     
     Args:
-        request: ChatRequest với messages, user_id, document_ids
+        request: ChatRequest với messages, user_id, document_ids (optional)
     
     Returns:
         ChatResponse với AI response
     """
     try:
-        # Convert ChatMessage objects to dicts
-        messages = [
-            {"role": msg.role, "content": msg.content}
-            for msg in request.messages
-        ]
+        # Get last user message
+        if not request.messages or len(request.messages) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Messages cannot be empty"
+            )
         
-        result = rag_service.chat(
-            messages=messages,
+        last_message = request.messages[-1].content
+        
+        # Use orchestrator for processing
+        result = await rag_service.query_with_orchestrator(
+            question=last_message,
             user_id=request.user_id,
             document_ids=request.document_ids,
+            top_k=3,  # Fewer contexts for chat
+            score_threshold=0.5,
             temperature=request.temperature,
             max_tokens=request.max_tokens
         )
@@ -107,7 +123,7 @@ async def chat(request: ChatRequest):
             ]
         
         return ChatResponse(
-            message=result["message"],
+            message=result.get("answer", result.get("message", "")),  # Support both keys
             contexts=contexts,
             model=result["model"],
             tokens_used=result.get("tokens_used")

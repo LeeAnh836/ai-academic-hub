@@ -5,19 +5,24 @@ fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-multipart==0.0.6
 
-# Pydantic settings
-pydantic==2.5.3
-pydantic-settings==2.1.0
+# Pydantic settings (compatible versions)
+pydantic==2.10.0
+pydantic-settings==2.7.0
 
 # Qdrant vector database client
 qdrant-client==1.7.3
 
-# Cohere API client
-cohere==4.47
+# Cohere API client (for embedding only)
+cohere>=5.0.0
 
-# LangChain core và loaders
-langchain==0.1.6
-langchain-community==0.0.20
+# Groq API (direct SDK)
+groq>=0.11.0
+
+# LangChain Community (ONLY for document loaders/text splitters)
+# Let pip resolve compatible versions together
+langchain-text-splitters>=0.3.0,<0.4.0
+langchain-core>=0.3.0,<0.4.0
+langchain-community>=0.3.0,<0.4.0
 
 # Document loaders dependencies
 pypdf==4.0.1

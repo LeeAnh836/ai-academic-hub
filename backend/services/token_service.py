@@ -72,9 +72,9 @@ class TokenService:
         )
     
     @staticmethod
-    def create_token_pair(data: Dict[str, Any]) -> Dict[str, str]:
+    async def create_token_pair(data: Dict[str, Any]) -> Dict[str, str]:
         """
-        Tạo cặp Access Token & Refresh Token
+        Tạo cặp Access Token & Refresh Token + Store mapping trong Redis
         
         Args:
             data: Dict chứa payload (user_id, email, etc.)
@@ -84,6 +84,14 @@ class TokenService:
         """
         access_token = TokenService.create_access_token(data)
         refresh_token = TokenService.create_refresh_token(data)
+        
+        # Store token pair mapping trong Redis để có thể blacklist refresh token khi logout
+        from datetime import timedelta
+        from core.config import settings
+        from core.redis import redis_blacklist
+        
+        refresh_ttl = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        await redis_blacklist.store_token_pair(access_token, refresh_token, refresh_ttl)
         
         return {
             "access_token": access_token,

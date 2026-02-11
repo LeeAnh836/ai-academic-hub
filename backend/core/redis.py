@@ -50,7 +50,10 @@ class RedisBlacklistManager:
             ttl: Thời gian tồn tại trong Redis
         
         Returns:
-            True nếu thêm thành công, False nếu thất bại
+            True nếu thêm thành công
+            
+        Raises:
+            RuntimeError: Nếu Redis không connect hoặc có lỗi
         """
         if not self.redis_client:
             raise RuntimeError("Redis client not connected")
@@ -62,10 +65,12 @@ class RedisBlacklistManager:
                 int(ttl.total_seconds()),
                 "blacklisted"
             )
+            print(f"✅ Token added to blacklist: {key[:50]}...")
             return True
         except Exception as e:
-            print(f"Error adding token to blacklist: {e}")
-            return False
+            # KHÔNG bỏ qua lỗi - raise để app biết Redis có vấn đề
+            print(f"❌ Error adding token to blacklist: {e}")
+            raise RuntimeError(f"Failed to add token to blacklist: {e}")
     
     async def is_blacklisted(self, token: str) -> bool:
         """
@@ -76,6 +81,9 @@ class RedisBlacklistManager:
         
         Returns:
             True nếu token bị blacklist, False nếu không
+            
+        Raises:
+            RuntimeError: Nếu Redis không connect hoặc có lỗi
         """
         if not self.redis_client:
             raise RuntimeError("Redis client not connected")
@@ -85,8 +93,9 @@ class RedisBlacklistManager:
             result = await self.redis_client.exists(key)
             return bool(result)
         except Exception as e:
+            # KHÔNG bỏ qua lỗi - raise để app biết Redis có vấn đề
             print(f"Error checking token blacklist: {e}")
-            return False
+            raise RuntimeError(f"Failed to check token blacklist: {e}")
     
     async def remove_from_blacklist(self, token: str) -> bool:
         """
@@ -129,6 +138,61 @@ class RedisBlacklistManager:
         except Exception as e:
             print(f"Error getting token TTL: {e}")
             return -1
+    
+    async def store_token_pair(
+        self,
+        access_token: str,
+        refresh_token: str,
+        ttl: timedelta
+    ) -> bool:
+        """
+        Lưu mapping giữa access_token và refresh_token
+        Dùng để tự động blacklist refresh_token khi logout
+        
+        Args:
+            access_token: Access token
+            refresh_token: Refresh token tương ứng
+            ttl: Thời gian tồn tại (dùng refresh token TTL)
+        
+        Returns:
+            True nếu lưu thành công
+        """
+        if not self.redis_client:
+            raise RuntimeError("Redis client not connected")
+        
+        key = f"token_pair:{access_token}"
+        try:
+            await self.redis_client.setex(
+                key,
+                int(ttl.total_seconds()),
+                refresh_token
+            )
+            print(f"✅ Token pair stored: {key[:60]}...")
+            return True
+        except Exception as e:
+            print(f"❌ Error storing token pair: {e}")
+            raise RuntimeError(f"Failed to store token pair: {e}")
+    
+    async def get_refresh_token(self, access_token: str) -> Optional[str]:
+        """
+        Lấy refresh_token tương ứng với access_token
+        
+        Args:
+            access_token: Access token
+        
+        Returns:
+            Refresh token nếu tìm thấy, None nếu không
+        """
+        if not self.redis_client:
+            raise RuntimeError("Redis client not connected")
+        
+        key = f"token_pair:{access_token}"
+        try:
+            refresh_token = await self.redis_client.get(key)
+            return refresh_token
+        except Exception as e:
+            print(f"Error getting refresh token: {e}")
+            return None
 
 
 # Global Redis blacklist manager instance
