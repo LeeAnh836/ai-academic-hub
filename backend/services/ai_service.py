@@ -109,9 +109,34 @@ class AIService:
             if not result["success"]:
                 raise Exception(result.get("message", "AI Service processing failed"))
             
-            # 4. AI Service đã upsert vào Qdrant, giờ lưu chunks vào PostgreSQL
-            # Note: AI Service trả về chunks_count, nhưng không trả về chunk data
-            # Để đơn giản, ta sẽ fetch chunks từ Qdrant hoặc có thể AI Service trả về
+            # 4. Lưu chunks và embeddings vào PostgreSQL
+            chunks_data = result.get("chunks", [])
+            if chunks_data:
+                from models.documents import DocumentChunk, DocumentEmbedding
+                
+                for chunk_data in chunks_data:
+                    # Create DocumentChunk
+                    chunk = DocumentChunk(
+                        id=chunk_data["chunk_id"],
+                        document_id=document_id,
+                        chunk_index=chunk_data["chunk_index"],
+                        chunk_text=chunk_data["chunk_text"],
+                        chunk_metadata=chunk_data.get("chunk_metadata", {}),
+                        token_count=chunk_data["token_count"]
+                    )
+                    db.add(chunk)
+                    
+                    # Create DocumentEmbedding (metadata only)
+                    embedding = DocumentEmbedding(
+                        chunk_id=chunk_data["chunk_id"],
+                        document_id=document_id,
+                        qdrant_point_id=chunk_data["chunk_id"],  # Same as chunk_id
+                        embedding_model="embed-multilingual-v3.0",
+                        vector_dimension=1024
+                    )
+                    db.add(embedding)
+                
+                print(f"✅ Saved {len(chunks_data)} chunks to PostgreSQL")
             
             # Update document status
             document.is_processed = True

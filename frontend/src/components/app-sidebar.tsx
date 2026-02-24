@@ -8,12 +8,16 @@ import {
   GraduationCap,
   ChevronLeft,
   ChevronRight,
+  LogOut,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useApp } from "@/lib/app-context"
+import { useAuth } from "@/hooks/use-auth"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { getUserInitials, getUserDisplayName, getRoleLabel, isAdmin } from "@/utils/user.utils"
+import { useToast } from "@/hooks/use-toast"
 
 const navItems = [
   { id: "dashboard" as const, label: "Dashboard", icon: LayoutDashboard },
@@ -28,7 +32,29 @@ const adminItems = [
 ]
 
 export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
-  const { currentPage, setCurrentPage, userRole, user } = useApp()
+  const { currentPage, setCurrentPage, user, setUser } = useApp()
+  const { logout } = useAuth()
+  const { toast } = useToast()
+  
+  // Don't render if user is not loaded yet
+  if (!user) {
+    return null
+  }
+
+  const handleLogout = async () => {
+    try {
+      await logout()
+      setUser(null)
+      toast({
+        title: "Logout successful",
+        description: "You have been logged out of the system",
+      })
+    } catch (error) {
+      console.error("Logout error:", error)
+      // Even if API call fails, still clear user state
+      setUser(null)
+    }
+  }
 
   return (
     <aside
@@ -39,11 +65,20 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
     >
       {/* Logo */}
       <div className="flex h-16 items-center gap-3 border-b border-border px-4">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <GraduationCap className="h-5 w-5" />
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg">
+          <img 
+            src="/logo.png"
+            alt="Logo"
+            className="h-full w-full object-contain"/>
         </div>
         {!collapsed && (
-          <span className="text-base font-semibold text-foreground">StudyHub</span>
+          <span className = "text-xl font-bold tracking-tight">
+            <span className="text-[#2B6CB0]">Wise</span>
+            <span className="text-[#7AC943]">ChatAI</span>
+          </span>
+          // <span className="text-xl font-bold bg-gradient-to-r from-blue-600 to-green-500 bg-clip-text text-transparent">
+          //   WiseChatAI
+          // </span>
         )}
       </div>
 
@@ -79,7 +114,7 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
           </button>
         ))}
 
-        {userRole === "admin" && (
+        {isAdmin(user) && (
           <>
             <div className={cn("my-3 border-t border-border", collapsed && "mx-2")} />
             {adminItems.map((item) => (
@@ -124,15 +159,31 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
         >
           <Avatar className="h-8 w-8 shrink-0">
             <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-              {user.name.split(" ").map(n => n[0]).join("")}
+              {getUserInitials(user)}
             </AvatarFallback>
           </Avatar>
           {!collapsed && (
             <div className="flex-1 text-left">
-              <p className="text-sm font-medium text-foreground">{user.name}</p>
-              <p className="text-xs text-muted-foreground">{user.role === "admin" ? "Admin" : "Student"}</p>
+              <p className="text-sm font-medium text-foreground">
+                {getUserDisplayName(user)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {getRoleLabel(user.role)}
+              </p>
             </div>
           )}
+        </button>
+
+        {/* Logout Button */}
+        <button
+          onClick={handleLogout}
+          className={cn(
+            "mt-2 flex w-full items-center gap-3 rounded-lg px-2 py-2 text-sm font-medium transition-colors",
+            "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+          )}
+        >
+          <LogOut className="h-5 w-5 shrink-0" />
+          {!collapsed && <span className="flex-1 text-left">Log Out</span>}
         </button>
       </div>
     </aside>

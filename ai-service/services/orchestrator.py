@@ -146,17 +146,31 @@ class AIOrchestrator:
             # System instruction
             system_instruction = """Bạn là trợ lý học tập thông minh, giúp sinh viên học tập hiệu quả.
 
-NHIỆM VỤ:
-- Trả lời câu hỏi rõ ràng, dễ hiểu
-- Giải thích chi tiết, có ví dụ minh họa
-- Với bài tập: hướng dẫn từng bước, giải thích logic
-- Với code: viết code đúng chuẩn, comment đầy đủ
-- Trả lời bằng tiếng Việt
+CẤU TRÚC TRẢ LỜI BẮT BUỘC:
 
-PHONG CÁCH:
-- Thân thiện, dễ tiếp cận
-- Khuyến khích tư duy phản biện
-- Đưa ra tips học tập"""
+1. **TỔNG QUAN** (2-3 câu giới thiệu)
+
+2. **CÁC KHÁI NIỆM CHÍNH** (Liệt kê ĐẦY ĐỦ TẤT CẢ trước khi giải thích)
+   - Đánh số rõ ràng: 1, 2, 3, 4...
+   - VD: "4 trụ cột OOP: 1) Encapsulation 2) Inheritance 3) Polymorphism 4) Abstraction"
+
+3. **GIẢI THÍCH CHI TIẾT**
+   - Giải thích TỪNG ĐIỂM đã liệt kê ở trên
+   - Kèm ví dụ minh họa đơn giản
+   - Không bỏ sót bất kỳ điểm nào
+
+4. **ỨNG DỤNG THỰC TẾ** (nếu có)
+
+
+5. **GỢI Ý TÌM HIỂU THÊM**
+   - Đưa ra 2-3 câu hỏi cụ thể để học sâu hơn
+   - VD: "💡 Muốn tìm hiểu thêm? Hãy hỏi: ..."
+
+YÊU CẦU QUAN TRỌNG:
+✅ Phải liệt kê ĐẦY ĐỦ tất cả điểm chính TRƯỚC KHI giải thích
+✅ Không được bỏ sót bất kỳ khái niệm quan trọng nào
+✅ Cân bằng giữa tổng quan và chi tiết
+✅ Trả lời bằng tiếng Việt, thân thiện"""
             
             # Generate answer
             answer = self.model_manager.generate_text(
@@ -165,7 +179,7 @@ PHONG CÁCH:
                 prompt=question,
                 system_instruction=system_instruction,
                 temperature=temperature or 0.7,
-                max_tokens=max_tokens or 2048
+                max_tokens=max_tokens or 4096  # Increased for comprehensive answers
             )
             
             return {
@@ -232,12 +246,27 @@ PHONG CÁCH:
             # System instruction
             system_instruction = """Bạn là trợ lý học tập thông minh. Trả lời câu hỏi dựa trên tài liệu được cung cấp.
 
+CẤU TRÚC TRẢ LỜI:
+
+1. **TÓM TẮT NGẮN GỌN** (2-3 câu)
+
+2. **CÁC ĐIỂM CHÍNH** (Liệt kê ĐẦY ĐỦ TẤT CẢ)
+   - Đánh số rõ ràng: 1, 2, 3, 4...
+   - Liệt kê HẾT các khái niệm/điểm quan trọng
+
+3. **GIẢI THÍCH CHI TIẾT**
+   - Giải thích TỪNG ĐIỂM đã liệt kê
+   - Trích dẫn nguồn: "Theo Tài liệu 1..."
+   - Kèm ví dụ từ tài liệu
+
+4. **GỢI Ý KHÁM PHÁ THÊM**
+   - 2-3 câu hỏi liên quan để học sâu hơn
+
 NGUYÊN TẮC:
-- Trả lời dựa CHÍNH XÁC vào nội dung tài liệu
-- Trích dẫn nguồn khi trả lời (ví dụ: "Theo Tài liệu 1...")
-- Nếu không tìm thấy thông tin, nói rõ "Thông tin này không có trong tài liệu"
-- Giải thích rõ ràng, dễ hiểu
-- Trả lời bằng tiếng Việt"""
+✅ Dựa CHÍNH XÁC vào nội dung tài liệu
+✅ Liệt kê ĐẦY ĐỦ trước khi giải thích chi tiết
+✅ Không bỏ sót điểm quan trọng nào
+✅ Nếu không có thông tin, nói rõ ràng"""
             
             # Build user prompt
             user_prompt = f"""TÀI LIỆU:
@@ -254,7 +283,7 @@ TRẢ LỜI:"""
                 prompt=user_prompt,
                 system_instruction=system_instruction,
                 temperature=temperature or settings.LLM_TEMPERATURE,
-                max_tokens=max_tokens or 2048
+                max_tokens=max_tokens or 7000  # Very high for detailed RAG answers
             )
             
             return {
@@ -343,7 +372,7 @@ TÓM TẮT:"""
                 prompt=user_prompt,
                 system_instruction=system_instruction,
                 temperature=temperature or 0.5,
-                max_tokens=max_tokens or 2048
+                max_tokens=max_tokens or 6000  # High for detailed summaries
             )
             
             return {
@@ -431,7 +460,7 @@ CÁC CÂU HỎI:"""
                 prompt=user_prompt,
                 system_instruction=system_instruction,
                 temperature=temperature or 0.9,
-                max_tokens=2048
+                max_tokens=6000  # High for many detailed questions
             )
             
             return {
@@ -465,8 +494,7 @@ CÁC CÂU HỎI:"""
             # System instruction
             system_instruction = """Bạn là gia sư chuyên nghiệp, giúp học sinh hiểu sâu kiến thức.
 
-NHIỆM VỤ:
-Hướng dẫn học sinh giải bài tập bằng cách:
+CẤU TRÚC HƯỚNG DẪN:
 
 1. **PHÂN TÍCH ĐỀ BÀI**
    - Xác định yêu cầu
@@ -475,24 +503,29 @@ Hướng dẫn học sinh giải bài tập bằng cách:
 
 2. **CÁCH TIẾP CẬN**
    - Phương pháp giải
-   - Các bước cần thực hiện
+   - Liệt kê ĐẦY ĐỦ TẤT CẢ bước cần làm
    - Lý do chọn cách này
 
 3. **LỜI GIẢI CHI TIẾT**
    - Từng bước cụ thể
    - Giải thích logic
    - Tính toán (nếu có)
+   - Code mẫu (nếu cần)
 
-4. **KẾT LUẬN**
-   - Đáp án
+4. **KẾT LUẬN & KIỂM TRA**
+   - Đáp án cuối cùng
    - Kiểm tra lại
    - Bài học rút ra
 
+5. **GỢI Ý NÂNG CAO**
+   - 2-3 câu hỏi/bài tập tương tự để luyện thêm
+   - VD: "💡 Thử thách: ..."
+
 YÊU CẦU:
-- Giải thích dễ hiểu
-- Không bỏ qua bước nào
-- Khuyến khích tư duy
-- Bằng tiếng Việt"""
+✅ Hướng dẫn ĐẦY ĐỦ, không bỏ bước nào
+✅ Giải thích dễ hiểu
+✅ Khuyến khích tư duy
+✅ Bằng tiếng Việt"""
             
             # Build user prompt
             user_prompt = f"""BÀI TẬP:
@@ -507,7 +540,7 @@ HƯỚNG DẪN:"""
                 prompt=user_prompt,
                 system_instruction=system_instruction,
                 temperature=temperature or 0.7,
-                max_tokens=max_tokens or 3072
+                max_tokens=max_tokens or 7000  # Very high for step-by-step solutions
             )
             
             return {
@@ -531,7 +564,7 @@ HƯỚNG DẪN:"""
         prompt: str,
         system_instruction: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: int = 2048
+        max_tokens: int = 7000  # Very high default
     ) -> tuple[str, str]:
         """
         Generate text with automatic fallback to Groq on 429 errors.
@@ -713,7 +746,7 @@ HƯỚNG DẪN:"""
                 prompt=question,
                 system_instruction=system_instruction,
                 temperature=temperature or 0.7,
-                max_tokens=max_tokens or 2048
+                max_tokens=max_tokens or 7000  # Very high for comprehensive answers
             )
             
             return {

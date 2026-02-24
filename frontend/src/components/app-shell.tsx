@@ -10,10 +10,26 @@ import { DocumentsPage } from "./pages/documents-page"
 import { GroupsPage } from "./pages/groups-page"
 import { AdminPage } from "./pages/admin-page"
 import { ProfilePage } from "./pages/profile-page"
+import { LoginPage } from "./pages/login-page"
+import { Loader2 } from "lucide-react"
 
 export function AppShell() {
-  const { currentPage } = useApp()
+  const { currentPage, isAuthenticated, loading } = useApp()
   const [collapsed, setCollapsed] = useState(false)
+
+  // Show loading spinner while checking authentication
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
+  // Show login page if not authenticated
+  if (!isAuthenticated) {
+    return <LoginPage />
+  }
 
   const renderPage = () => {
     switch (currentPage) {

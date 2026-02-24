@@ -4,34 +4,45 @@ AI-powered learning platform with RAG (Retrieval Augmented Generation) using Fas
 
 ---
 
-## ⚡ Quick Start (5 Minutes)
+## ⚡ Quick Start (3 Steps)
 
 ### 1️⃣ Setup Environment
 
 ```powershell
-# Auto setup (recommended)
-.\setup.ps1
-
-# Manual setup
-cp .env.example .env
-notepad .env  # Add your Cohere API key
+# Copy .env.example files (nếu có) hoặc tạo .env files trong backend/ và ai-service/
+notepad backend/.env
+notepad ai-service/.env
 ```
 
-**Get Cohere API Key (Free):**
-👉 https://dashboard.cohere.com/api-keys
+**Yêu cầu:**
+- Cohere API Key (Free): https://dashboard.cohere.com/api-keys
 
 ---
 
-### 2️⃣ Start Services
+### 2️⃣ Start All Services
 
 ```powershell
-docker-compose up -d
+docker compose up -d
 ```
+
+Chờ 30-60 giây để tất cả services khởi động.
 
 **Check status:**
 ```powershell
-docker-compose ps
+docker compose ps
+# All services should show "Up" status
 ```
+
+---
+
+### 3️⃣ Access the Application
+
+🌐 **Web Interface:** http://localhost:5173
+
+**First time:**
+1. Register a new account
+2. Upload documents
+3. Chat with AI based on your documents
 
 ---
 
@@ -39,6 +50,7 @@ docker-compose ps
 
 | Service | URL | Description |
 |---------|-----|-------------|
+| **Frontend** | http://localhost:5173 | React Web Application |
 | **Backend API** | http://localhost:8000/docs | REST API + Swagger UI |
 | **AI Service** | http://localhost:8001/docs | AI/RAG endpoints |
 | **MinIO Console** | http://localhost:9001 | Object storage (admin/minioadmin) |
@@ -46,35 +58,33 @@ docker-compose ps
 
 ---
 
-### 4️⃣ Test Chat with AI
+### 4️⃣ Use the Application
 
-**Quick test guide:** [QUICK_TEST_GUIDE.md](QUICK_TEST_GUIDE.md)
+**Option 1: Web Interface (Recommended)**
+1. Open http://localhost:5173 in your browser
+2. Register a new account or login
+3. Upload documents in the "Documents" page
+4. Chat with AI in the "AI Chat" page
 
-**Steps:**
-1. Login at http://localhost:8000/docs → Get token
-2. Authorize with token (click 🔒 button)
-3. Upload document → Wait 30s-1min
-4. Extract `user_id` from token at https://jwt.io
-5. Chat at http://localhost:8001/docs → `/api/rag/query`
-
-```json
-{
-  "question": "What is in this document?",
-  "user_id": "<user_id from JWT>",
-  "document_ids": ["<document_id from upload>"]
-}
-```
+**Option 2: API Testing (Advanced)**
+- Backend API Docs: http://localhost:8000/docs
+- AI Service Docs: http://localhost:8001/docs
+- Full guide: [MANUAL_TESTING_GUIDE.md](MANUAL_TESTING_GUIDE.md)
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────┐
-│  Frontend   │ (React/Vue - Coming soon)
-└──────┬──────┘
-       │ HTTP REST + JWT
-       ▼
+┌─────────────────────────┐
+│  Frontend (Port 5173)   │
+│  React + Vite + TS      │
+│  - Authentication UI    │
+│  - Document Management  │
+│  - AI Chat Interface    │
+└──────────┬──────────────┘
+           │ HTTP REST + JWT
+           ▼
 ┌─────────────────────────┐
 │  Backend (Port 8000)    │
 │  - Authentication       │
@@ -92,6 +102,7 @@ docker-compose ps
 ```
 
 **Stack:**
+- **Frontend:** React + TypeScript + Vite + Tailwind CSS + shadcn/ui
 - **Backend:** FastAPI + PostgreSQL + Redis + MinIO
 - **AI:** Cohere (LLM + Embeddings) + Qdrant (Vector DB)
 - **Auth:** JWT tokens (15min access, 7 day refresh)

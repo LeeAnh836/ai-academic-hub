@@ -82,11 +82,24 @@ async def process_document(
             metadata=meta
         )
         
+        # 7. Return chunk data to Backend for PostgreSQL storage
+        chunks_for_backend = [
+            {
+                "chunk_id": chunk_id,
+                "chunk_index": chunk_data["chunk_index"],
+                "chunk_text": chunk_data["chunk_text"],
+                "chunk_metadata": chunk_data.get("chunk_metadata", {}),
+                "token_count": chunk_data["token_count"]
+            }
+            for chunk_id, chunk_data in zip(chunk_ids, chunks_data)
+        ]
+        
         return {
             "success": True,
             "message": "Document processed successfully",
             "chunks_count": len(chunks),
-            "vectors_count": len(embeddings)
+            "vectors_count": len(embeddings),
+            "chunks": chunks_for_backend  # ← TRẢ VỀ CHUNK DATA
         }
     
     except Exception as e:

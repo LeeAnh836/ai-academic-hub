@@ -6,13 +6,30 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { Separator } from "@/components/ui/separator"
 import { useApp } from "@/lib/app-context"
+import { getUserInitials, getUserDisplayName, getRoleLabel, formatStudentId } from "@/utils/user.utils"
+import { useCurrentUser } from "@/hooks/use-auth"
 
 export function ProfilePage() {
-  const { user, userRole, setUserRole } = useApp()
+  const { user } = useApp()
+  const { updateUser } = useCurrentUser()
   const [showPassword, setShowPassword] = useState(false)
   const [darkMode, setDarkMode] = useState(false)
+  const [fullName, setFullName] = useState(user?.full_name || "")
+  const [isUpdating, setIsUpdating] = useState(false)
+  
+  if (!user) return null
+
+  const handleUpdateProfile = async () => {
+    setIsUpdating(true)
+    try {
+      await updateUser({ full_name: fullName })
+    } catch (error) {
+      console.error("Failed to update profile:", error)
+    } finally {
+      setIsUpdating(false)
+    }
+  }
 
   const toggleTheme = (checked: boolean) => {
     setDarkMode(checked)
@@ -38,7 +55,7 @@ export function ProfilePage() {
             <div className="relative">
               <Avatar className="h-20 w-20">
                 <AvatarFallback className="bg-primary text-primary-foreground text-xl font-semibold">
-                  {user.name.split(" ").map(n => n[0]).join("")}
+                  {getUserInitials(user)}
                 </AvatarFallback>
               </Avatar>
               <button className="absolute bottom-0 right-0 flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition-transform hover:scale-110">
@@ -46,10 +63,10 @@ export function ProfilePage() {
               </button>
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-foreground">{user.name}</h2>
+              <h2 className="text-lg font-semibold text-foreground">{getUserDisplayName(user)}</h2>
               <p className="text-sm text-muted-foreground">{user.email}</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {user.role === "admin" ? "Administrator" : "Student"} &middot; {user.studentId}
+                {getRoleLabel(user.role)} &middot; {formatStudentId(user.student_id)}
               </p>
             </div>
           </div>
@@ -67,14 +84,18 @@ export function ProfilePage() {
               <Label className="text-sm text-foreground">Full Name</Label>
               <div className="relative mt-1">
                 <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input defaultValue={user.name} className="bg-secondary pl-9" />
+                <Input 
+                  value={fullName} 
+                  onChange={(e) => setFullName(e.target.value)}
+                  className="bg-secondary pl-9" 
+                />
               </div>
             </div>
             <div>
               <Label className="text-sm text-foreground">Email</Label>
               <div className="relative mt-1">
                 <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input defaultValue={user.email} className="bg-secondary pl-9" />
+                <Input value={user.email} className="bg-secondary pl-9" readOnly />
               </div>
             </div>
           </div>
@@ -82,12 +103,16 @@ export function ProfilePage() {
             <Label className="text-sm text-foreground">Student ID</Label>
             <div className="relative mt-1">
               <IdCard className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input defaultValue={user.studentId} className="bg-secondary pl-9" readOnly />
+              <Input value={formatStudentId(user.student_id)} className="bg-secondary pl-9" readOnly />
             </div>
           </div>
-          <Button className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
+          <Button 
+            className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
+            onClick={handleUpdateProfile}
+            disabled={isUpdating}
+          >
             <Save className="h-4 w-4" />
-            Save Changes
+            {isUpdating ? "Saving..." : "Save Changes"}
           </Button>
         </CardContent>
       </Card>
@@ -154,22 +179,6 @@ export function ProfilePage() {
               </div>
             </div>
             <Switch checked={darkMode} onCheckedChange={toggleTheme} />
-          </div>
-          <Separator />
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-foreground">Role (Demo Toggle)</p>
-              <p className="text-xs text-muted-foreground">
-                Currently: {userRole === "admin" ? "Admin" : "Student"}
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setUserRole(userRole === "admin" ? "user" : "admin")}
-            >
-              Switch to {userRole === "admin" ? "Student" : "Admin"}
-            </Button>
           </div>
         </CardContent>
       </Card>

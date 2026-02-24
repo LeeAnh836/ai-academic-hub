@@ -318,12 +318,21 @@ async def ask_in_chat_session(
         ai_service_url = f"{settings.AI_SERVICE_URL}/api/rag/query"
         
         # Prepare request for AI Service
+        # Logic: 
+        # - document_ids=[] → Direct chat (no RAG)
+        # - document_ids=None → Use session's context_documents
+        # - document_ids=[...] → Use specified documents
+        if request.document_ids is not None:
+            # User explicitly specified (including [])
+            doc_ids_to_use = [str(doc_id) for doc_id in request.document_ids] if request.document_ids else None
+        else:
+            # Use session's context_documents
+            doc_ids_to_use = [str(doc_id) for doc_id in session.context_documents] if session.context_documents else None
+        
         ai_request = {
             "question": request.question,
             "user_id": str(current_user.id),
-            "document_ids": request.document_ids or (
-                [str(doc_id) for doc_id in session.context_documents] if session.context_documents else None
-            ),
+            "document_ids": doc_ids_to_use,
             "top_k": request.top_k,
             "score_threshold": request.score_threshold
         }

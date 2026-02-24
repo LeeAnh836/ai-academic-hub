@@ -71,19 +71,24 @@ class MessageFeedbackRequest(BaseModel):
 class ChatAskRequest(BaseModel):
     """Schema cho request hỏi AI trong chat session"""
     question: str = Field(..., min_length=1, max_length=5000)
-    document_ids: Optional[List[str]] = Field(default=None, description="Filter theo document IDs")
+    document_ids: Optional[List[str]] = Field(
+        default=None, 
+        description="Document IDs to query. Use [] for direct chat (no RAG), None to use session's context_documents"
+    )
     top_k: int = Field(default=5, ge=1, le=20)
     score_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     temperature: Optional[float] = Field(default=0.7, ge=0.0, le=1.0)
-    max_tokens: Optional[int] = Field(default=2000, ge=100, le=8000)
+    max_tokens: Optional[int] = Field(default=4000, ge=100, le=16000)
 
     class Config:
         json_schema_extra = {
             "example": {
                 "question": "Tài liệu này nói về gì?",
-                "document_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+                "document_ids": None,
                 "top_k": 5,
-                "score_threshold": 0.5
+                "score_threshold": 0.5,
+                "temperature": 0.7,
+                "max_tokens": 4000
             }
         }
 

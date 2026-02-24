@@ -95,7 +95,7 @@ class ModelManager:
         prompt: str, 
         system_instruction: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: int = 2048
+        max_tokens: int = 8000
     ) -> str:
         """Generate text with provider."""
         try:
@@ -116,7 +116,7 @@ class ModelManager:
                     }
                 }
                 
-                with httpx.Client(timeout=60.0) as client:
+                with httpx.Client(timeout=240.0) as client:  # 4 minutes timeout for long responses
                     response = client.post(url, json=payload)
                     response.raise_for_status()
                     data = response.json()

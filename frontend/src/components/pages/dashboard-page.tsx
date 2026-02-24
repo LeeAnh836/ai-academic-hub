@@ -7,31 +7,39 @@ import {
   Upload,
   UserPlus,
   ArrowUpRight,
-  MessageCircle,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { useApp } from "@/lib/app-context"
-import { mockAIConversations, mockDocuments, mockGroups } from "@/lib/mock-data"
-
-const stats = [
-  { label: "Documents", value: "24", icon: FileText, change: "+3 this week" },
-  { label: "AI Chats", value: "18", icon: Bot, change: "+5 this week" },
-  { label: "Study Groups", value: "5", icon: Users, change: "+1 this week" },
-  { label: "Study Time", value: "32h", icon: Clock, change: "+4h this week" },
-]
+import { getUserDisplayName } from "@/utils/user.utils"
+import { formatRelativeTime } from "@/utils/format.utils"
+import { useChatSessions } from "@/hooks/use-chat"
+import { useDocuments } from "@/hooks/use-documents"
+import { useGroups } from "@/hooks/use-groups"
 
 export function DashboardPage() {
   const { setCurrentPage, user } = useApp()
+  const { sessions, loading: sessionsLoading } = useChatSessions(true)
+  const { documents, loading: documentsLoading } = useDocuments(true)
+  const { groups, loading: groupsLoading } = useGroups(true)
+  
+  if (!user) return null
+  
+  const stats = [
+    { label: "Documents", value: documents.length.toString(), icon: FileText, change: "+3 this week" },
+    { label: "AI Chats", value: sessions.length.toString(), icon: Bot, change: "+5 this week" },
+    { label: "Study Groups", value: groups.length.toString(), icon: Users, change: "+1 this week" },
+    { label: "Study Time", value: "32h", icon: Clock, change: "+4h this week" },
+  ]
 
   return (
     <div className="space-y-6 p-4 md:p-6 lg:p-8">
       {/* Welcome */}
       <div>
         <h1 className="text-2xl font-bold text-foreground">
-          Welcome back, {user.name.split(" ")[0]}
+          Welcome back, {getUserDisplayName(user).split(" ")[0]}
         </h1>
         <p className="text-sm text-muted-foreground">
           Here is what is happening with your studies today.
@@ -90,22 +98,32 @@ export function DashboardPage() {
             </Button>
           </CardHeader>
           <CardContent className="space-y-3">
-            {mockAIConversations.slice(0, 4).map((chat) => (
-              <button
-                key={chat.id}
-                onClick={() => setCurrentPage("ai-chat")}
-                className="flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-secondary"
-              >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent">
-                  <Bot className="h-4 w-4 text-accent-foreground" />
-                </div>
-                <div className="flex-1 overflow-hidden">
-                  <p className="truncate text-sm font-medium text-foreground">{chat.title}</p>
-                  <p className="truncate text-xs text-muted-foreground">{chat.lastMessage}</p>
-                </div>
-                <span className="shrink-0 text-xs text-muted-foreground">{chat.updatedAt}</span>
-              </button>
-            ))}
+            {sessionsLoading ? (
+              <p className="text-sm text-muted-foreground text-center py-4">Loading...</p>
+            ) : sessions.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">No chats yet. Start your first AI conversation!</p>
+            ) : (
+              sessions.slice(0, 4).map((chat) => (
+                <button
+                  key={chat.id}
+                  onClick={() => setCurrentPage("ai-chat")}
+                  className="flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-secondary"
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent">
+                    <Bot className="h-4 w-4 text-accent-foreground" />
+                  </div>
+                  <div className="flex-1 overflow-hidden">
+                    <p className="truncate text-sm font-medium text-foreground">{chat.title}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {chat.message_count} messages • {formatRelativeTime(chat.updated_at)}
+                    </p>
+                  </div>
+                  <Badge variant="secondary" className="shrink-0 text-[10px]">
+                    {chat.model_name}
+                  </Badge>
+                </button>
+              ))
+            )}
           </CardContent>
         </Card>
 
@@ -123,27 +141,31 @@ export function DashboardPage() {
             </Button>
           </CardHeader>
           <CardContent className="space-y-3">
-            {mockDocuments.slice(0, 4).map((doc) => (
-              <div
-                key={doc.id}
-                className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-secondary"
-              >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent">
-                  <FileText className="h-4 w-4 text-accent-foreground" />
-                </div>
-                <div className="flex-1 overflow-hidden">
-                  <p className="truncate text-sm font-medium text-foreground">{doc.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {doc.size} &middot; {doc.updatedAt}
-                  </p>
-                </div>
-                {doc.shared && (
+            {documentsLoading ? (
+              <p className="text-sm text-muted-foreground text-center py-4">Loading...</p>
+            ) : documents.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">No documents yet. Upload your first file!</p>
+            ) : (
+              documents.slice(0, 4).map((doc) => (
+                <div
+                  key={doc.id}
+                  className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-secondary"
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent">
+                    <FileText className="h-4 w-4 text-accent-foreground" />
+                  </div>
+                  <div className="flex-1 overflow-hidden">
+                    <p className="truncate text-sm font-medium text-foreground">{doc.title}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {doc.file_type} • {formatRelativeTime(doc.updated_at)}
+                    </p>
+                  </div>
                   <Badge variant="secondary" className="shrink-0 text-xs">
-                    Shared
+                    {doc.category}
                   </Badge>
-                )}
-              </div>
-            ))}
+                </div>
+              ))
+            )}
           </CardContent>
         </Card>
 
@@ -162,29 +184,35 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {mockGroups.slice(0, 3).map((group) => (
-                <div
-                  key={group.id}
-                  className="flex items-center gap-3 rounded-lg border border-border p-3 transition-colors hover:bg-secondary"
-                >
-                  <Avatar className="h-10 w-10 shrink-0">
-                    <AvatarFallback className="bg-accent text-accent-foreground text-sm">
-                      {group.name.split(" ").map(n => n[0]).slice(0, 2).join("")}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 overflow-hidden">
-                    <p className="truncate text-sm font-medium text-foreground">{group.name}</p>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <Users className="h-3 w-3" /> {group.members}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <MessageCircle className="h-3 w-3" /> {group.lastActive}
-                      </span>
+              {groupsLoading ? (
+                <p className="text-sm text-muted-foreground text-center py-4 col-span-full">Loading...</p>
+              ) : groups.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4 col-span-full">No groups yet. Create or join a study group!</p>
+              ) : (
+                groups.slice(0, 3).map((group) => (
+                  <div
+                    key={group.id}
+                    className="flex items-center gap-3 rounded-lg border border-border p-3 transition-colors hover:bg-secondary"
+                  >
+                    <Avatar className="h-10 w-10 shrink-0">
+                      <AvatarFallback className="bg-accent text-accent-foreground text-sm">
+                        {group.group_name.split(" ").map(n => n[0]).slice(0, 2).join("")}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 overflow-hidden">
+                      <p className="truncate text-sm font-medium text-foreground">{group.group_name}</p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1">
+                          <Users className="h-3 w-3" /> {group.member_count}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" /> {formatRelativeTime(group.updated_at)}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </CardContent>
         </Card>

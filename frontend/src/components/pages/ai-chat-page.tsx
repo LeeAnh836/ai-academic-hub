@@ -1,15 +1,14 @@
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import {
   Bot,
   Send,
   Plus,
   Search,
-  Paperclip,
-  ImageIcon,
   MoreVertical,
   Trash2,
   ArrowLeft,
-  Sparkles,
+  Loader2,
+  Paperclip,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -22,20 +21,150 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { mockAIConversations, mockAIMessages } from "@/lib/mock-data"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
+import { useChatSessions, useChatMessages, useChatAsk } from "@/hooks/use-chat"
+import { useToast } from "@/hooks/use-toast"
+import { ChatDocumentSelector } from "@/components/chat-document-selector"
 
 export function AIChatPage() {
-  const [selectedChat, setSelectedChat] = useState<string | null>("ai1")
+  const [selectedChat, setSelectedChat] = useState<string | null>(null)
   const [message, setMessage] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
+  const [newSessionTitle, setNewSessionTitle] = useState("")
+  const [documentSelectorOpen, setDocumentSelectorOpen] = useState(false)
+  const [sessionDocuments, setSessionDocuments] = useState<string[]>([])
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const { toast } = useToast()
 
-  const filteredConversations = mockAIConversations.filter((c) =>
+  const { sessions, loading: sessionsLoading, createSession, deleteSession } = useChatSessions()
+  const { messages, loading: messagesLoading, refetch: refetchMessages } = useChatMessages(selectedChat)
+  const { askInSession, loading: askLoading } = useChatAsk()
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  const filteredConversations = sessions.filter((c) =>
     c.title.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
+  const handleCreateSession = async () => {
+    if (!newSessionTitle.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a title",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      const newSession = await createSession({
+        title: newSessionTitle,
+        session_type: 'general',
+        model_name: 'llama3.2:1b',
+      })
+      setSelectedChat(newSession.id)
+      setNewSessionTitle("")
+      setCreateDialogOpen(false)
+      toast({
+        title: "Success",
+        description: "Chat session created",
+      })
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create session",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleDeleteSession = async (sessionId: string) => {
+    try {
+      await deleteSession(sessionId)
+      if (selectedChat === sessionId) {
+        setSelectedChat(null)
+      }
+      toast({
+        title: "Success",
+        description: "Chat session deleted",
+      })
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete session",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleSendMessage = async () => {
+    if (!message.trim()) return
+    if (!selectedChat) {
+      toast({
+        title: "Error",
+        description: "Please create a chat session first",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const userMessage = message.trim()
+    setMessage("")
+
+    try {
+      // Ask AI directly (will save both user message and AI response)
+      await askInSession(selectedChat, userMessage, {
+        document_ids: sessionDocuments.length > 0 ? sessionDocuments : null,
+        top_k: 5,
+        score_threshold: 0.5,
+      })
+      
+      // Refresh messages to show the conversation
+      await refetchMessages()
+      
+      toast({
+        title: "Success",
+        description: "AI has responded to your question",
+      })
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to send message",
+        variant: "destructive",
+      })
+      setMessage(userMessage)  // Restore message on error
+    }
+  }
+
+  const formatTimestamp = (timestamp: string) => {
+    const date = new Date(timestamp)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMins = Math.floor(diffMs / 60000)
+    
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins}m ago`
+    
+    const diffHours = Math.floor(diffMins / 60)
+    if (diffHours < 24) return `${diffHours}h ago`
+    
+    return date.toLocaleDateString()
+  }
+
   return (
     <div className="flex h-[calc(100vh-56px)] md:h-screen">
-      {/* Conversation List - Desktop always visible, Mobile toggleable */}
+      {/* Conversation List */}
       <div
         className={cn(
           "flex w-full flex-col border-r border-border bg-card md:w-[300px] lg:w-[320px]",
@@ -45,9 +174,45 @@ export function AIChatPage() {
         {/* Header */}
         <div className="flex h-14 items-center justify-between border-b border-border px-4">
           <h2 className="font-semibold text-foreground">AI Chats</h2>
-          <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground">
-            <Plus className="h-4 w-4" />
-          </Button>
+          <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground">
+                <Plus className="h-4 w-4" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>New Chat Session</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 pt-4">
+                <div>
+                  <Label htmlFor="title">Session Title</Label>
+                  <Input
+                    id="title"
+                    value={newSessionTitle}
+                    onChange={(e) => setNewSessionTitle(e.target.value)}
+                    placeholder="e.g. Math Homework Help"
+                    className="mt-1"
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateSession()}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={handleCreateSession} className="flex-1">
+                    Create
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setCreateDialogOpen(false)
+                      setNewSessionTitle("")
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
 
         {/* Search */}
@@ -65,31 +230,43 @@ export function AIChatPage() {
 
         {/* Conversation List */}
         <ScrollArea className="flex-1">
-          <div className="space-y-1 p-2">
-            {filteredConversations.map((chat) => (
-              <button
-                key={chat.id}
-                onClick={() => setSelectedChat(chat.id)}
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors",
-                  selectedChat === chat.id
-                    ? "bg-accent"
-                    : "hover:bg-secondary"
-                )}
-              >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                  <Bot className="h-4 w-4 text-primary" />
-                </div>
-                <div className="flex-1 overflow-hidden">
-                  <div className="flex items-center justify-between">
-                    <p className="truncate text-sm font-medium text-foreground">{chat.title}</p>
-                    <span className="shrink-0 text-xs text-muted-foreground">{chat.updatedAt}</span>
+          {sessionsLoading ? (
+            <div className="flex items-center justify-center p-4">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : filteredConversations.length === 0 ? (
+            <div className="p-4 text-center text-sm text-muted-foreground">
+              No chats yet. Start a new conversation!
+            </div>
+          ) : (
+            <div className="space-y-1 p-2">
+              {filteredConversations.map((chat) => (
+                <button
+                  key={chat.id}
+                  onClick={() => setSelectedChat(chat.id)}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors",
+                    selectedChat === chat.id ? "bg-accent" : "hover:bg-secondary"
+                  )}
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                    <Bot className="h-4 w-4 text-primary" />
                   </div>
-                  <p className="truncate text-xs text-muted-foreground">{chat.lastMessage}</p>
-                </div>
-              </button>
-            ))}
-          </div>
+                  <div className="flex-1 overflow-hidden">
+                    <div className="flex items-center justify-between">
+                      <p className="truncate text-sm font-medium text-foreground">{chat.title}</p>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {formatTimestamp(chat.updated_at)}
+                      </span>
+                    </div>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {chat.message_count} messages
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </ScrollArea>
       </div>
 
@@ -118,117 +295,142 @@ export function AIChatPage() {
                 </div>
                 <div>
                   <p className="text-sm font-medium text-foreground">
-                    {mockAIConversations.find((c) => c.id === selectedChat)?.title}
+                    {sessions.find((c) => c.id === selectedChat)?.title}
                   </p>
                   <p className="text-xs text-muted-foreground">AI Tutor</p>
                 </div>
               </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground">
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem className="text-destructive">
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Delete Chat
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setDocumentSelectorOpen(true)}
+                  className="h-8"
+                >
+                  <Paperclip className="h-4 w-4 mr-1" />
+                  {sessionDocuments.length > 0 
+                    ? `${sessionDocuments.length} docs` 
+                    : "Attach"}
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem 
+                      className="text-destructive"
+                      onClick={() => handleDeleteSession(selectedChat)}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete Chat
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
 
             {/* Messages */}
             <ScrollArea className="flex-1 p-4">
               <div className="mx-auto max-w-3xl space-y-6">
-                {mockAIMessages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={cn(
-                      "flex gap-3",
-                      msg.role === "user" ? "justify-end" : "justify-start"
-                    )}
-                  >
-                    {msg.role === "assistant" && (
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                        <Sparkles className="h-4 w-4" />
-                      </div>
-                    )}
+                {messagesLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  </div>
+                ) : messages.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <Bot className="h-12 w-12 text-muted-foreground mb-4" />
+                    <p className="text-sm text-muted-foreground">
+                      No messages yet. Start the conversation!
+                    </p>
+                  </div>
+                ) : (
+                  messages.map((msg) => (
                     <div
+                      key={msg.id}
                       className={cn(
-                        "max-w-[80%] rounded-2xl px-4 py-3",
-                        msg.role === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-card text-card-foreground border border-border"
+                        "flex gap-3",
+                        msg.role === "user" ? "justify-end" : "justify-start"
                       )}
                     >
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
-                      <p
+                      {msg.role === "assistant" && (
+                        <Avatar className="h-8 w-8 shrink-0 border border-border">
+                          <AvatarFallback className="bg-primary/10 text-primary text-xs">
+                            <Bot className="h-4 w-4" />
+                          </AvatarFallback>
+                        </Avatar>
+                      )}
+                      <div
                         className={cn(
-                          "mt-1 text-xs",
+                          "max-w-[80%] rounded-2xl px-4 py-3",
                           msg.role === "user"
-                            ? "text-primary-foreground/70"
-                            : "text-muted-foreground"
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-secondary text-secondary-foreground"
                         )}
                       >
-                        {msg.timestamp}
-                      </p>
+                        <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
+                        <span className="mt-1 block text-xs opacity-70">
+                          {formatTimestamp(msg.created_at)}
+                        </span>
+                      </div>
                     </div>
-                    {msg.role === "user" && (
-                      <Avatar className="h-8 w-8 shrink-0">
-                        <AvatarFallback className="bg-secondary text-secondary-foreground text-xs">AC</AvatarFallback>
-                      </Avatar>
-                    )}
-                  </div>
-                ))}
+                  ))
+                )}
+                <div ref={messagesEndRef} />
               </div>
             </ScrollArea>
 
             {/* Input */}
             <div className="border-t border-border p-4">
-              <div className="mx-auto flex max-w-3xl items-center gap-2">
-                <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0 text-muted-foreground">
-                  <Paperclip className="h-4 w-4" />
-                </Button>
-                <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0 text-muted-foreground">
-                  <ImageIcon className="h-4 w-4" />
-                </Button>
-                <Input
-                  placeholder="Ask your AI tutor anything..."
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  className="flex-1 bg-card"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault()
-                      setMessage("")
-                    }
-                  }}
-                />
-                <Button size="icon" className="h-9 w-9 shrink-0 bg-primary text-primary-foreground hover:bg-primary/90">
-                  <Send className="h-4 w-4" />
-                </Button>
+              <div className="mx-auto max-w-3xl">
+                <div className="flex items-center gap-2">
+                  <Input
+                    placeholder="Ask me anything..."
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
+                    className="flex-1 bg-secondary"
+                    disabled={askLoading}
+                  />
+                  <Button
+                    size="icon"
+                    onClick={handleSendMessage}
+                    disabled={!message.trim() || askLoading}
+                    className="shrink-0"
+                  >
+                    {askLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
               </div>
             </div>
           </>
         ) : (
-          <div className="flex flex-1 items-center justify-center">
+          <div className="hidden md:flex flex-1 items-center justify-center">
             <div className="text-center">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent">
-                <Bot className="h-8 w-8 text-accent-foreground" />
-              </div>
-              <h3 className="text-lg font-semibold text-foreground">Start a new conversation</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Ask your AI tutor about any subject
+              <Bot className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+              <h3 className="text-lg font-medium text-foreground mb-2">
+                No Chat Selected
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                Select a chat or create a new one to start
               </p>
-              <Button className="mt-4 gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
-                <Plus className="h-4 w-4" />
-                New Chat
-              </Button>
             </div>
           </div>
         )}
       </div>
+
+      {/* Document Selector Dialog */}
+      <ChatDocumentSelector
+        open={documentSelectorOpen}
+        onOpenChange={setDocumentSelectorOpen}
+        selectedDocIds={sessionDocuments}
+        onDocumentsChange={setSessionDocuments}
+      />
     </div>
   )
 }

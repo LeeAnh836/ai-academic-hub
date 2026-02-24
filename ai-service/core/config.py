@@ -56,8 +56,8 @@ class Settings(BaseSettings):
     
     # LLM Settings
     LLM_TEMPERATURE: float = 0.7
-    LLM_MAX_TOKENS: int = 2000
-    LLM_TIMEOUT: int = 60
+    LLM_MAX_TOKENS: int = 8000  # Near maximum for comprehensive explanations
+    LLM_TIMEOUT: int = 240  # 4 minutes for very detailed answers
     
     # Chunking Settings
     CHUNK_SIZE: int = 1000

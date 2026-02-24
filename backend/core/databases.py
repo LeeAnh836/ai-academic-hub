@@ -8,7 +8,7 @@ from typing import Generator
 from .config import settings
 
 # Import all models to register them before creating tables
-from models import base, users, documents, chat, groups, conversations, notifications, audit  # noqa: F401
+from models import base, users, documents, chat, groups, conversations, notifications  # noqa: F401
 
 
 # Tạo engine kết nối database

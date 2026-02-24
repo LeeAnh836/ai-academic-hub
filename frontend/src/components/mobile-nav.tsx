@@ -8,11 +8,15 @@ import {
   Shield,
   User,
   GraduationCap,
+  LogOut,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useApp } from "@/lib/app-context"
+import { useAuth } from "@/hooks/use-auth"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
+import { getUserInitials, getUserDisplayName, getRoleLabel, isAdmin } from "@/utils/user.utils"
+import { useToast } from "@/hooks/use-toast"
 import { useState } from "react"
 
 const bottomNavItems = [
@@ -24,8 +28,30 @@ const bottomNavItems = [
 ]
 
 export function MobileHeader() {
-  const { currentPage, setCurrentPage, userRole, user } = useApp()
+  const { currentPage, setCurrentPage, user, setUser } = useApp()
+  const { logout } = useAuth()
+  const { toast } = useToast()
   const [open, setOpen] = useState(false)
+  
+  // Don't render if user is not loaded yet
+  if (!user) return null
+
+  const handleLogout = async () => {
+    try {
+      await logout()
+      setUser(null)
+      setOpen(false)
+      toast({
+        title: "Đăng xuất thành công",
+        description: "Bạn đã đăng xuất khỏi hệ thống",
+      })
+    } catch (error) {
+      console.error("Logout error:", error)
+      // Even if API call fails, still clear user state
+      setUser(null)
+      setOpen(false)
+    }
+  }
 
   const pageTitle: Record<string, string> = {
     dashboard: "Dashboard",
@@ -56,16 +82,16 @@ export function MobileHeader() {
             <div className="flex items-center gap-3 border-b border-border p-4">
               <Avatar className="h-10 w-10">
                 <AvatarFallback className="bg-primary text-primary-foreground text-sm">
-                  {user.name.split(" ").map(n => n[0]).join("")}
+                  {getUserInitials(user)}
                 </AvatarFallback>
               </Avatar>
               <div>
-                <p className="text-sm font-medium text-foreground">{user.name}</p>
-                <p className="text-xs text-muted-foreground">{user.role === "admin" ? "Admin" : "Student"}</p>
+                <p className="text-sm font-medium text-foreground">{getUserDisplayName(user)}</p>
+                <p className="text-xs text-muted-foreground">{getRoleLabel(user.role)}</p>
               </div>
             </div>
             <nav className="flex-1 p-3 space-y-1">
-              {userRole === "admin" && (
+              {isAdmin(user) && (
                 <button
                   onClick={() => { setCurrentPage("admin"); setOpen(false) }}
                   className={cn(
@@ -92,6 +118,16 @@ export function MobileHeader() {
                 Profile & Settings
               </button>
             </nav>
+            {/* Logout Button */}
+            <div className="border-t border-border p-3">
+              <button
+                onClick={handleLogout}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+              >
+                <LogOut className="h-5 w-5" />
+                Đăng xuất
+              </button>
+            </div>
           </div>
         </SheetContent>
       </Sheet>
