@@ -7,7 +7,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from core.databases import get_db
-from api.dependencies import get_current_user
+from api.dependencies import get_current_user, CurrentUser
 from schemas.document import (
     DocumentResponse, DocumentCreateRequest, DocumentUpdateRequest,
     DocumentShareRequest, DocumentShareResponse, DocumentDetailResponse
@@ -17,7 +17,11 @@ from models.documents import Document, DocumentShare
 from services.minio_service import minio_service
 from services.ai_service import ai_service
 
-router = APIRouter(prefix="/api/documents", tags=["documents"])
+router = APIRouter(
+    prefix="/api/documents", 
+    tags=["documents"],
+    dependencies=[Depends(get_current_user)]  # Apply authentication to all endpoints
+)
 
 
 # ============================================
@@ -43,7 +47,7 @@ def process_document_background(document_id: UUID):
 # ============================================
 @router.get("", response_model=List[DocumentResponse])
 async def list_documents(
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db),
     skip: int = 0,
     limit: int = 10
@@ -64,11 +68,11 @@ async def list_documents(
 @router.post("/upload", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
 async def upload_document(
     background_tasks: BackgroundTasks,
+    current_user: CurrentUser,
     file: UploadFile = File(...),
     title: Optional[str] = Form(None),
     category: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),  # JSON string: '["tag1", "tag2"]'
-    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -178,7 +182,7 @@ async def upload_document(
 @router.get("/{document_id}/download")
 async def download_document(
     document_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
     """
@@ -233,7 +237,7 @@ async def download_document(
 @router.get("/{document_id}", response_model=DocumentDetailResponse)
 async def get_document(
     document_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
     """
@@ -267,7 +271,7 @@ async def get_document(
 async def update_document(
     document_id: UUID,
     request: DocumentUpdateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
     """
@@ -309,7 +313,7 @@ async def update_document(
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     document_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
     """
@@ -355,7 +359,7 @@ async def delete_document(
 async def share_document(
     document_id: UUID,
     request: DocumentShareRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
     """

@@ -1,30 +1,114 @@
 // ============================================
-// Base API Client
+// Base API Client - Using HttpOnly Cookies
 // ============================================
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
 console.log('🔗 API Base URL:', API_BASE_URL) // Debug log
 
-// Token management
-let accessToken: string | null = localStorage.getItem('access_token')
-let refreshToken: string | null = localStorage.getItem('refresh_token')
+// Token management - Tokens are now in HttpOnly cookies, managed by backend
+// Auto-refresh timer
+let autoRefreshTimer: number | null = null
 
-export const setTokens = (access: string, refresh: string) => {
-  accessToken = access
-  refreshToken = refresh
-  localStorage.setItem('access_token', access)
-  localStorage.setItem('refresh_token', refresh)
+// Clear any old localStorage tokens (migration)
+if (localStorage.getItem('access_token') || localStorage.getItem('refresh_token')) {
+  localStorage.removeItem('access_token')
+  localStorage.removeItem('refresh_token')
+  console.log('🔄 Migrated from localStorage to HttpOnly cookies')
+}
+
+// Token refresh logic - MUST be defined before startAutoRefresh
+let isRefreshing = false
+let failedQueue: Array<{
+  resolve: (value?: any) => void
+  reject: (error?: any) => void
+}> = []
+
+const processQueue = (error: any = null) => {
+  failedQueue.forEach(prom => {
+    if (error) {
+      prom.reject(error)
+    } else {
+      prom.resolve()
+    }
+  })
+  failedQueue = []
+}
+
+async function refreshAccessToken(): Promise<void> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include', // Important: Send cookies
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      // Refresh token expired or invalid
+      stopAutoRefresh()
+      
+      // Only redirect if not already on login page
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+      
+      throw new ApiError(response.status, 'Token refresh failed')
+    }
+
+    // Tokens are set in cookies by backend
+    console.log('✅ Token refreshed successfully')
+  } catch (error) {
+    stopAutoRefresh()
+    
+    // Only redirect if not already on login page
+    if (window.location.pathname !== '/login') {
+      window.location.href = '/login'
+    }
+    
+    throw error
+  }
+}
+
+// Start auto-refresh timer - refresh 2 minutes before expiry
+const startAutoRefresh = () => {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer)
+  }
+  
+  // Refresh every 13 minutes (access token expires in 15 minutes)
+  autoRefreshTimer = window.setInterval(async () => {
+    try {
+      console.log('🔄 Auto-refreshing access token...')
+      await refreshAccessToken()
+    } catch (error) {
+      console.error('❌ Auto-refresh failed:', error)
+      // If refresh fails, stop the timer
+      stopAutoRefresh()
+    }
+  }, 13 * 60 * 1000) // 13 minutes
+}
+
+const stopAutoRefresh = () => {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer)
+    autoRefreshTimer = null
+  }
 }
 
 export const clearTokens = () => {
-  accessToken = null
-  refreshToken = null
-  localStorage.removeItem('access_token')
-  localStorage.removeItem('refresh_token')
+  stopAutoRefresh()
+  // Cookies will be cleared by backend on logout
+  // Just clear any local state
+  console.log('🔒 Tokens cleared')
 }
 
-export const getAccessToken = () => accessToken
+// Start auto-refresh after successful login
+export const initAutoRefresh = () => {
+  startAutoRefresh()
+  console.log('✅ Auto-refresh initialized')
+}
 
 // API Error class
 export class ApiError extends Error {
@@ -47,51 +131,6 @@ interface RequestConfig extends RequestInit {
   isRefreshRequest?: boolean
 }
 
-// Token refresh logic
-let isRefreshing = false
-let failedQueue: Array<{
-  resolve: (value?: any) => void
-  reject: (error?: any) => void
-}> = []
-
-const processQueue = (error: any = null, token: string | null = null) => {
-  failedQueue.forEach(prom => {
-    if (error) {
-      prom.reject(error)
-    } else {
-      prom.resolve(token)
-    }
-  })
-  failedQueue = []
-}
-
-const refreshAccessToken = async (): Promise<string> => {
-  if (!refreshToken) {
-    throw new ApiError(401, 'No refresh token available')
-  }
-
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    })
-
-    if (!response.ok) {
-      throw new ApiError(response.status, 'Token refresh failed')
-    }
-
-    const data = await response.json()
-    setTokens(data.access_token, data.refresh_token)
-    return data.access_token
-  } catch (error) {
-    clearTokens()
-    throw error
-  }
-}
-
 // Main API request function
 export const apiRequest = async <T = any>(
   endpoint: string,
@@ -105,11 +144,6 @@ export const apiRequest = async <T = any>(
     ...(fetchConfig.headers as Record<string, string>),
   }
 
-  // Add auth header if not skipped
-  if (!skipAuth && accessToken) {
-    headers['Authorization'] = `Bearer ${accessToken}`
-  }
-
   // Add Content-Type for non-FormData requests
   if (!(fetchConfig.body instanceof FormData) && fetchConfig.body) {
     headers['Content-Type'] = 'application/json'
@@ -119,22 +153,28 @@ export const apiRequest = async <T = any>(
     const response = await fetch(url, {
       ...fetchConfig,
       headers,
+      credentials: 'include', // Important: Include cookies in all requests
     })
 
     // Handle 401 - Token expired
     if (response.status === 401 && !skipAuth && !isRefreshRequest) {
+      // Don't try to refresh if we're already on login page
+      if (window.location.pathname === '/login') {
+        throw new ApiError(response.status, 'Unauthorized')
+      }
+      
       if (!isRefreshing) {
         isRefreshing = true
         try {
-          const newToken = await refreshAccessToken()
+          await refreshAccessToken()
           isRefreshing = false
-          processQueue(null, newToken)
+          processQueue(null)
           
-          // Retry original request with new token
+          // Retry original request
           return apiRequest<T>(endpoint, config)
         } catch (error) {
           isRefreshing = false
-          processQueue(error, null)
+          processQueue(error)
           throw error
         }
       } else {

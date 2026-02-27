@@ -7,7 +7,7 @@ from typing import List
 from uuid import UUID
 
 from core.databases import get_db
-from api.dependencies import get_current_user
+from api.dependencies import get_current_user, CurrentUser
 from services.chat_service import chat_service
 from schemas.chat import (
     ChatSessionResponse, ChatSessionCreateRequest, ChatMessageResponse,
@@ -20,7 +20,11 @@ import httpx
 import time
 from core.config import settings
 
-router = APIRouter(prefix="/api/chat", tags=["chat"])
+router = APIRouter(
+    prefix="/api/chat", 
+    tags=["chat"],
+    dependencies=[Depends(get_current_user)]  # Apply authentication to all endpoints
+)
 
 
 # ============================================
@@ -28,7 +32,7 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 # ============================================
 @router.get("/sessions", response_model=List[ChatSessionResponse])
 async def list_chat_sessions(
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db),
     skip: int = 0,
     limit: int = 10
@@ -52,7 +56,7 @@ async def list_chat_sessions(
 @router.post("/sessions", response_model=ChatSessionResponse, status_code=status.HTTP_201_CREATED)
 async def create_chat_session(
     request: ChatSessionCreateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
     """
@@ -76,7 +80,7 @@ async def create_chat_session(
 @router.get("/sessions/{session_id}", response_model=ChatSessionDetailResponse)
 async def get_chat_session(
     session_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
     """
@@ -97,7 +101,7 @@ async def get_chat_session(
 @router.post("/messages", response_model=ChatMessageResponse, status_code=status.HTTP_201_CREATED)
 async def send_chat_message(
     request: ChatMessageCreateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
     """
@@ -146,7 +150,7 @@ async def send_chat_message(
 @router.get("/sessions/{session_id}/messages", response_model=List[ChatMessageResponse])
 async def get_session_messages(
     session_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db),
     skip: int = 0,
     limit: int = 50
@@ -184,7 +188,7 @@ async def get_session_messages(
 async def send_message_feedback(
     message_id: UUID,
     request: MessageFeedbackRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
     """
@@ -237,7 +241,7 @@ async def send_message_feedback(
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_chat_session(
     session_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
     """
@@ -267,7 +271,7 @@ async def delete_chat_session(
 async def ask_in_chat_session(
     session_id: UUID,
     request: ChatAskRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
     """

@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
@@ -42,6 +43,7 @@ export function AIChatPage() {
   const [sessionDocuments, setSessionDocuments] = useState<string[]>([])
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const { toast } = useToast()
 
   const { sessions, loading: sessionsLoading, createSession, deleteSession } = useChatSessions()
@@ -52,6 +54,15 @@ export function AIChatPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (textarea) {
+      textarea.style.height = 'auto'
+      textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px'
+    }
+  }, [message])
 
   const filteredConversations = sessions.filter((c) =>
     c.title.toLowerCase().includes(searchQuery.toLowerCase())
@@ -121,6 +132,11 @@ export function AIChatPage() {
 
     const userMessage = message.trim()
     setMessage("")
+
+    // Reset textarea height
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+    }
 
     try {
       // Ask AI directly (will save both user message and AI response)
@@ -384,20 +400,27 @@ export function AIChatPage() {
             {/* Input */}
             <div className="border-t border-border p-4">
               <div className="mx-auto max-w-3xl">
-                <div className="flex items-center gap-2">
-                  <Input
-                    placeholder="Ask me anything..."
+                <div className="flex items-end gap-2">
+                  <Textarea
+                    ref={textareaRef}
+                    placeholder="Ask me anything ..."
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
-                    className="flex-1 bg-secondary"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        handleSendMessage()
+                      }
+                    }}
+                    className="flex-1 bg-secondary min-h-[44px] max-h-[200px] resize-none"
                     disabled={askLoading}
+                    rows={1}
                   />
                   <Button
                     size="icon"
                     onClick={handleSendMessage}
                     disabled={!message.trim() || askLoading}
-                    className="shrink-0"
+                    className="shrink-0 h-[44px] w-[44px]"
                   >
                     {askLoading ? (
                       <Loader2 className="h-4 w-4 animate-spin" />

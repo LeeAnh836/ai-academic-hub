@@ -3,13 +3,18 @@ JWT token encoding and decoding utilities
 Pure technical functions - chỉ encode/decode JWT, không có business logic
 """
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, Optional
+from typing import Dict, Union, Optional, TypeVar, cast
 import jwt
 from fastapi import HTTPException, status
 
+from schemas.jwt import JWTBasePayload, JWTAccessPayload, JWTRefreshPayload
+
+# Generic type cho JWT payload
+JWTPayload = TypeVar('JWTPayload', JWTBasePayload, JWTAccessPayload, JWTRefreshPayload)
+
 
 def encode_jwt(
-    payload: Dict[str, Any],
+    payload: Dict[str, Union[str, int]],
     secret_key: str,
     algorithm: str = "HS256",
     expires_delta: Optional[timedelta] = None
@@ -44,7 +49,7 @@ def decode_jwt(
     secret_key: str,
     algorithm: str = "HS256",
     verify_exp: bool = True
-) -> Dict[str, Any]:
+) -> Union[JWTAccessPayload, JWTRefreshPayload]:
     """
     Decode và verify JWT token
     
@@ -68,7 +73,8 @@ def decode_jwt(
             algorithms=[algorithm],
             options=options
         )
-        return payload
+        # Cast to Union type for type safety
+        return cast(Union[JWTAccessPayload, JWTRefreshPayload], payload)
         
     except jwt.ExpiredSignatureError:
         raise HTTPException(

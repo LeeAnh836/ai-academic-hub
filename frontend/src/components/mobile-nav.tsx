@@ -13,25 +13,28 @@ import {
 import { cn } from "@/lib/utils"
 import { useApp } from "@/lib/app-context"
 import { useAuth } from "@/hooks/use-auth"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { useNavigate, useLocation } from "react-router-dom"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { getUserInitials, getUserDisplayName, getRoleLabel, isAdmin } from "@/utils/user.utils"
 import { useToast } from "@/hooks/use-toast"
 import { useState } from "react"
 
 const bottomNavItems = [
-  { id: "dashboard" as const, label: "Home", icon: LayoutDashboard },
-  { id: "ai-chat" as const, label: "AI Chat", icon: Bot },
-  { id: "messages" as const, label: "Messages", icon: MessageCircle, badge: 7 },
-  { id: "documents" as const, label: "Files", icon: FileText },
-  { id: "groups" as const, label: "Groups", icon: Users },
+  { id: "dashboard" as const, label: "Home", icon: LayoutDashboard, path: "/dashboard" },
+  { id: "ai-chat" as const, label: "AI Chat", icon: Bot, path: "/ai-chat" },
+  { id: "messages" as const, label: "Messages", icon: MessageCircle, badge: 7, path: "/messages" },
+  { id: "documents" as const, label: "Files", icon: FileText, path: "/documents" },
+  { id: "groups" as const, label: "Groups", icon: Users, path: "/groups" },
 ]
 
 export function MobileHeader() {
-  const { currentPage, setCurrentPage, user, setUser } = useApp()
+  const { user, setUser } = useApp()
   const { logout } = useAuth()
   const { toast } = useToast()
   const [open, setOpen] = useState(false)
+  const navigate = useNavigate()
+  const location = useLocation()
   
   // Don't render if user is not loaded yet
   if (!user) return null
@@ -54,13 +57,13 @@ export function MobileHeader() {
   }
 
   const pageTitle: Record<string, string> = {
-    dashboard: "Dashboard",
-    "ai-chat": "AI Chat",
-    messages: "Messages",
-    documents: "Documents",
-    groups: "Groups",
-    admin: "Admin Panel",
-    profile: "Profile",
+    "/dashboard": "Dashboard",
+    "/ai-chat": "AI Chat",
+    "/messages": "Messages",
+    "/documents": "Documents",
+    "/groups": "Groups",
+    "/admin": "Admin Panel",
+    "/settings": "Settings",
   }
 
   return (
@@ -69,7 +72,7 @@ export function MobileHeader() {
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
           <GraduationCap className="h-4 w-4" />
         </div>
-        <span className="font-semibold text-foreground">{pageTitle[currentPage]}</span>
+        <span className="font-semibold text-foreground">{pageTitle[location.pathname] || "Dashboard"}</span>
       </div>
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
@@ -81,6 +84,12 @@ export function MobileHeader() {
           <div className="flex flex-col h-full">
             <div className="flex items-center gap-3 border-b border-border p-4">
               <Avatar className="h-10 w-10">
+                {user.avatar_url && (
+                  <AvatarImage 
+                    src={`${user.avatar_url}?t=${new Date(user.updated_at || Date.now()).getTime()}`} 
+                    alt={getUserDisplayName(user)} 
+                  />
+                )}
                 <AvatarFallback className="bg-primary text-primary-foreground text-sm">
                   {getUserInitials(user)}
                 </AvatarFallback>
@@ -93,10 +102,10 @@ export function MobileHeader() {
             <nav className="flex-1 p-3 space-y-1">
               {isAdmin(user) && (
                 <button
-                  onClick={() => { setCurrentPage("admin"); setOpen(false) }}
+                  onClick={() => { navigate("/admin"); setOpen(false) }}
                   className={cn(
                     "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                    currentPage === "admin"
+                    location.pathname === "/admin"
                       ? "bg-accent text-accent-foreground"
                       : "text-muted-foreground hover:bg-secondary hover:text-foreground"
                   )}
@@ -106,16 +115,16 @@ export function MobileHeader() {
                 </button>
               )}
               <button
-                onClick={() => { setCurrentPage("profile"); setOpen(false) }}
+                onClick={() => { navigate("/settings"); setOpen(false) }}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                  currentPage === "profile"
+                  location.pathname === "/settings"
                     ? "bg-accent text-accent-foreground"
                     : "text-muted-foreground hover:bg-secondary hover:text-foreground"
                 )}
               >
                 <User className="h-5 w-5" />
-                Profile & Settings
+                Settings
               </button>
             </nav>
             {/* Logout Button */}
@@ -136,17 +145,18 @@ export function MobileHeader() {
 }
 
 export function MobileBottomNav() {
-  const { currentPage, setCurrentPage } = useApp()
+  const navigate = useNavigate()
+  const location = useLocation()
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 flex h-16 items-center justify-around border-t border-border bg-card md:hidden">
       {bottomNavItems.map((item) => (
         <button
           key={item.id}
-          onClick={() => setCurrentPage(item.id)}
+          onClick={() => navigate(item.path)}
           className={cn(
             "relative flex flex-col items-center gap-0.5 px-3 py-1 text-xs transition-colors",
-            currentPage === item.id
+            location.pathname === item.path
               ? "text-primary"
               : "text-muted-foreground"
           )}

@@ -31,11 +31,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
-import { useApp } from "@/lib/app-context"
+import { useNavigate } from "react-router-dom"
 import { mockGroups, mockUsers, mockDocuments } from "@/lib/mock-data"
 
 export function GroupsPage() {
-  const { setCurrentPage } = useApp()
+  const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
 
@@ -165,7 +165,7 @@ export function GroupsPage() {
                           size="sm"
                           variant="ghost"
                           className="h-7 gap-1 text-xs text-primary"
-                          onClick={(e) => { e.stopPropagation(); setCurrentPage("messages") }}
+                          onClick={(e) => { e.stopPropagation(); navigate("/messages") }}
                         >
                           <MessageCircle className="h-3 w-3" /> Chat
                         </Button>
@@ -223,7 +223,7 @@ export function GroupsPage() {
 
               {/* Actions */}
               <div className="flex gap-3">
-                <Button className="flex-1 gap-2 bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setCurrentPage("messages")}>
+                <Button className="flex-1 gap-2 bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => navigate("/messages")}>
                   <MessageCircle className="h-4 w-4" /> Open Chat
                 </Button>
                 <Button variant="outline" className="flex-1 gap-2 bg-transparent">

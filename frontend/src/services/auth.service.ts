@@ -1,7 +1,7 @@
 // ============================================
 // Auth Service
 // ============================================
-import { api, setTokens, clearTokens } from './api'
+import { api, clearTokens, initAutoRefresh } from './api'
 import type {
   RegisterRequest,
   LoginRequest,
@@ -15,10 +15,11 @@ export const authService = {
     return api.post<MessageResponse>('/api/auth/register', data, { skipAuth: true })
   },
 
-  // Login
+  // Login - Tokens are set in HttpOnly cookies by backend
   login: async (data: LoginRequest): Promise<TokenResponse> => {
     const response = await api.post<TokenResponse>('/api/auth/login', data, { skipAuth: true })
-    setTokens(response.access_token, response.refresh_token)
+    // Start auto-refresh timer after successful login
+    initAutoRefresh()
     return response
   },
 
@@ -32,14 +33,13 @@ export const authService = {
     }
   },
 
-  // Refresh token
-  refreshToken: async (refreshToken: string): Promise<TokenResponse> => {
+  // Refresh token - Not needed anymore as it's handled automatically
+  refreshToken: async (): Promise<TokenResponse> => {
     const response = await api.post<TokenResponse>(
       '/api/auth/refresh',
-      { refresh_token: refreshToken },
+      {},
       { skipAuth: true, isRefreshRequest: true }
     )
-    setTokens(response.access_token, response.refresh_token)
     return response
   },
 }

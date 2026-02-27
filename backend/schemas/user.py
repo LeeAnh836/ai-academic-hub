@@ -13,12 +13,25 @@ from uuid import UUID
 class UserUpdateRequest(BaseModel):
     """Schema cho request cập nhật user - CHỈ cho phép sửa full_name"""
     full_name: Optional[str] = Field(None, max_length=255, description="Họ tên người dùng")
-    # avatar_url: Optional[str] = None  # TODO: Thêm sau này
     
     class Config:
         json_schema_extra = {
             "example": {
                 "full_name": "Nguyễn Văn A"
+            }
+        }
+
+
+class ChangePasswordRequest(BaseModel):
+    """Schema cho request đổi mật khẩu"""
+    current_password: str = Field(..., min_length=6, description="Mật khẩu hiện tại")
+    new_password: str = Field(..., min_length=6, description="Mật khẩu mới")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "current_password": "OldPass123!",
+                "new_password": "NewPass123!"
             }
         }
 
@@ -79,6 +92,7 @@ class UserResponse(BaseModel):
     email: str
     username: str
     full_name: Optional[str]
+    avatar_url: Optional[str]
     role: str
     student_id: str
     is_verified: bool

@@ -2,12 +2,13 @@
 Dịch vụ xử lý JWT Access Token và Refresh Token
 """
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any
+from typing import Optional, Union
 from fastapi import HTTPException, status
 
 from core.config import settings
 from core.redis import redis_blacklist
 from utils.jwt import encode_jwt, decode_jwt
+from schemas.jwt import JWTUserData, JWTAccessPayload, JWTRefreshPayload, TokenPair, create_jwt_user_data
 
 
 class TokenService:
@@ -17,7 +18,7 @@ class TokenService:
     
     @staticmethod
     def create_access_token(
-        data: Dict[str, Any],
+        data: JWTUserData,
         expires_delta: Optional[timedelta] = None
     ) -> str:
         """
@@ -45,7 +46,7 @@ class TokenService:
     
     @staticmethod
     def create_refresh_token(
-        data: Dict[str, Any],
+        data: JWTUserData,
         expires_delta: Optional[timedelta] = None
     ) -> str:
         """
@@ -72,7 +73,7 @@ class TokenService:
         )
     
     @staticmethod
-    async def create_token_pair(data: Dict[str, Any]) -> Dict[str, str]:
+    async def create_token_pair(data: JWTUserData) -> TokenPair:
         """
         Tạo cặp Access Token & Refresh Token + Store mapping trong Redis
         
@@ -100,7 +101,7 @@ class TokenService:
         }
     
     @staticmethod
-    def verify_token(token: str, token_type: str = "access") -> Dict[str, Any]:
+    def verify_token(token: str, token_type: str = "access") -> Union[JWTAccessPayload, JWTRefreshPayload]:
         """
         Xác minh và giải mã token
         
@@ -193,12 +194,13 @@ class TokenService:
                 headers={"WWW-Authenticate": "Bearer"}
             )
         
-        # Tạo access token mới
-        access_token = TokenService.create_access_token({
-            "user_id": payload.get("user_id"),
-            "email": payload.get("email"),
-            "username": payload.get("username"),
-        })
+        # Tạo access token mới từ payload
+        user_data = create_jwt_user_data(
+            user_id=payload.get("user_id", ""),
+            email=payload.get("email", ""),
+            username=payload.get("username", "")
+        )
+        access_token = TokenService.create_access_token(user_data)
         
         return access_token
 

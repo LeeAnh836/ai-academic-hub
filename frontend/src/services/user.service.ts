@@ -29,4 +29,33 @@ export const userService = {
   updateUserSettings: async (data: Partial<UserSettings>): Promise<UserSettings> => {
     return api.put<UserSettings>('/api/users/me/settings', data)
   },
+
+  // Change password
+  changePassword: async (data: { current_password: string; new_password: string }): Promise<{ message: string }> => {
+    return api.post<{ message: string }>('/api/users/me/change-password', data)
+  },
+
+  // Upload avatar
+  uploadAvatar: async (file: File): Promise<User> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+    const token = localStorage.getItem('access_token')
+    
+    const response = await fetch(`${API_BASE_URL}/api/users/me/avatar`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: formData,
+    })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }))
+      throw new Error(error.detail || 'Upload failed')
+    }
+
+    return response.json()
+  },
 }

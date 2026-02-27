@@ -1,8 +1,8 @@
 """
 Authentication routes - Register, Login, Logout, Token Management
 """
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
+from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 
 from core.databases import get_db
@@ -60,17 +60,19 @@ async def register(
 @router.post("/login", response_model=TokenResponse)
 async def login(
     request: LoginRequest,
+    response: Response,
     db: Session = Depends(get_db)
 ):
     """
-    Đăng nhập
+    Đăng nhập - Set tokens vào HttpOnly cookies
     
     Args:
         request: LoginRequest schema
+        response: Response object để set cookies
         db: Database session
     
     Returns:
-        Token pair
+        Token pair (cũng set vào cookies)
     """
     result = await auth_service.login_user(
         email=request.email,
@@ -78,9 +80,34 @@ async def login(
         db=db
     )
     
+    access_token = result["tokens"]["access_token"]
+    refresh_token = result["tokens"]["refresh_token"]
+    
+    # Set access token cookie (expires in 15 minutes)
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        httponly=settings.COOKIE_HTTPONLY,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        domain=settings.COOKIE_DOMAIN
+    )
+    
+    # Set refresh token cookie (expires in 7 days)
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        httponly=settings.COOKIE_HTTPONLY,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        domain=settings.COOKIE_DOMAIN
+    )
+    
     return {
-        "access_token": result["tokens"]["access_token"],
-        "refresh_token": result["tokens"]["refresh_token"],
+        "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
         "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     }
@@ -91,25 +118,47 @@ async def login(
 # ============================================
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(
-    request: RefreshTokenRequest,
+    request_obj: Request,
+    response: Response,
     db: Session = Depends(get_db)
 ):
     """
-    Làm mới access token
+    Làm mới access token - Đọc refresh token từ cookie hoặc body
     
     Args:
-        request: RefreshTokenRequest schema
+        request_obj: Request object để đọc cookies
+        response: Response object để set cookies mới
         db: Database session
     
     Returns:
         New access token
     """
     try:
-        new_access_token = await token_service.refresh_access_token(request.refresh_token)
+        # Lấy refresh token từ cookie trước, nếu không có thì từ body (backward compatible)
+        refresh_token = request_obj.cookies.get("refresh_token")
+        
+        if not refresh_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token not found"
+            )
+        
+        new_access_token = await token_service.refresh_access_token(refresh_token)
+        
+        # Set new access token cookie
+        response.set_cookie(
+            key="access_token",
+            value=new_access_token,
+            max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            httponly=settings.COOKIE_HTTPONLY,
+            secure=settings.COOKIE_SECURE,
+            samesite=settings.COOKIE_SAMESITE,
+            domain=settings.COOKIE_DOMAIN
+        )
         
         return {
             "access_token": new_access_token,
-            "refresh_token": request.refresh_token,
+            "refresh_token": refresh_token,
             "token_type": "bearer",
             "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         }
@@ -127,31 +176,45 @@ async def refresh(
 # ============================================
 @router.post("/logout", response_model=MessageResponse)
 async def logout(
+    request_obj: Request,
+    response: Response,
     current_user: User = Depends(get_current_user),
-    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ):
     """
-    Logout - thêm tokens vào blacklist
+    Logout - thêm tokens vào blacklist và xóa cookies
     
-    Tự động lấy access_token từ header Authorization.
-    Không cần gửi gì trong body - chỉ cần có Bearer token trong header.
+    Tự động lấy access_token từ cookie hoặc header.
     
     Args:
+        request_obj: Request object để đọc cookies
+        response: Response object để xóa cookies
         current_user: Current user (tự động lấy từ token)
-        credentials: HTTPAuthorizationCredentials chứa access_token
         db: Database session
     
     Returns:
         Success message
     """
-    # Lấy access_token từ header Authorization
-    access_token = credentials.credentials
+    # Lấy access_token từ cookie hoặc header (get_current_user đã verify)
+    access_token = request_obj.cookies.get("access_token")
+    if not access_token:
+        # Try header if cookie not found
+        auth_header = request_obj.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            access_token = auth_header[7:]
     
-    await auth_service.logout_user(
-        access_token=access_token,
-        refresh_token=None,
-        user_id=str(current_user.id)
-    )
+    # Lấy refresh_token từ cookie (nếu có)
+    refresh_token = request_obj.cookies.get("refresh_token")
+    
+    if access_token:
+        await auth_service.logout_user(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            user_id=str(current_user.id)
+        )
+    
+    # Clear cookies
+    response.delete_cookie(key="access_token", domain=settings.COOKIE_DOMAIN)
+    response.delete_cookie(key="refresh_token", domain=settings.COOKIE_DOMAIN)
     
     return {"message": "Logout successful"}

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import {
   Send,
   Search,
@@ -17,6 +17,7 @@ import {
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
@@ -34,6 +35,16 @@ export function MessagesPage() {
   const [message, setMessage] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
   const [showInfoPanel, setShowInfoPanel] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (textarea) {
+      textarea.style.height = 'auto'
+      textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px'
+    }
+  }, [message])
 
   const filteredConversations = mockConversations.filter((c) =>
     c.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -316,24 +327,29 @@ export function MessagesPage() {
 
                 {/* Input */}
                 <div className="border-t border-border p-4">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-end gap-2">
                     <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0 text-muted-foreground">
                       <Paperclip className="h-4 w-4" />
                     </Button>
                     <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0 text-muted-foreground">
                       <ImageIcon className="h-4 w-4" />
                     </Button>
-                    <Input
-                      placeholder="Type a message..."
+                    <Textarea
+                      ref={textareaRef}
+                      placeholder="Type a message ..."
                       value={message}
                       onChange={(e) => setMessage(e.target.value)}
-                      className="flex-1 bg-card"
+                      className="flex-1 bg-card min-h-[36px] max-h-[200px] resize-none"
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.shiftKey) {
                           e.preventDefault()
                           setMessage("")
+                          if (textareaRef.current) {
+                            textareaRef.current.style.height = 'auto'
+                          }
                         }
                       }}
+                      rows={1}
                     />
                     <Button size="icon" className="h-9 w-9 shrink-0 bg-primary text-primary-foreground hover:bg-primary/90">
                       <Send className="h-4 w-4" />

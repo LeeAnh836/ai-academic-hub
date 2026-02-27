@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 
 from models.users import User, UserSettings
 from utils.validators import is_valid_email, sanitize_string
+from utils.password import hash_password, verify_password
 
 
 class UserService:
@@ -155,6 +156,83 @@ class UserService:
         db.refresh(settings)
         
         return settings
+    
+    @staticmethod
+    def change_password(
+        user_id: str,
+        current_password: str,
+        new_password: str,
+        db: Session
+    ) -> bool:
+        """
+        Đổi mật khẩu của user
+        
+        Args:
+            user_id: ID của user
+            current_password: Mật khẩu hiện tại
+            new_password: Mật khẩu mới
+            db: Database session
+        
+        Returns:
+            True nếu thành công
+        
+        Raises:
+            HTTPException: Nếu user không tồn tại hoặc mật khẩu hiện tại sai
+        """
+        user = db.query(User).filter(User.id == user_id).first()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Verify current password
+        if not verify_password(current_password, user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Current password is incorrect"
+            )
+        
+        # Hash and update new password
+        user.password_hash = hash_password(new_password)
+        db.commit()
+        
+        return True
+    
+    @staticmethod
+    def update_avatar(
+        user_id: str,
+        avatar_url: str,
+        db: Session
+    ) -> User:
+        """
+        Cập nhật avatar của user
+        
+        Args:
+            user_id: ID của user
+            avatar_url: URL của avatar mới
+            db: Database session
+        
+        Returns:
+            User object đã cập nhật
+        
+        Raises:
+            HTTPException: Nếu user không tồn tại
+        """
+        user = db.query(User).filter(User.id == user_id).first()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        user.avatar_url = avatar_url
+        db.commit()
+        db.refresh(user)
+        
+        return user
     
     @staticmethod
     def deactivate_user(user_id: str, db: Session) -> bool:

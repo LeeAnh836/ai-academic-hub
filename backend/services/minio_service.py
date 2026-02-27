@@ -79,6 +79,53 @@ class MinIOService:
             raise Exception(f"MinIO upload error: {e}")
     
     @staticmethod
+    def upload_file_bytes(
+        file_content: bytes,
+        object_name: str,
+        content_type: str,
+        bucket_name: str = None
+    ) -> str:
+        """
+        Upload file bytes lên MinIO và trả về URL public
+        
+        Args:
+            file_content: File binary data (bytes)
+            object_name: Tên object trong MinIO (vd: avatars/user_id.jpg)
+            content_type: MIME type của file
+            bucket_name: Tên bucket (mặc định lấy từ settings)
+        
+        Returns:
+            str: Public URL của file
+        
+        Raises:
+            Exception: Nếu upload thất bại
+        """
+        bucket = bucket_name or settings.MINIO_BUCKET_NAME
+        
+        try:
+            # Convert bytes to BytesIO for MinIO
+            from io import BytesIO
+            file_io = BytesIO(file_content)
+            file_size = len(file_content)
+            
+            # Upload to MinIO
+            minio_client.client.put_object(
+                bucket_name=bucket,
+                object_name=object_name,
+                data=file_io,
+                length=file_size,
+                content_type=content_type
+            )
+            
+            # Return public URL
+            # Format: http://minio:9000/bucket/object_name
+            minio_url = settings.MINIO_URL.rstrip('/')
+            return f"{minio_url}/{bucket}/{object_name}"
+        
+        except S3Error as e:
+            raise Exception(f"MinIO upload error: {e}")
+    
+    @staticmethod
     def download_file(
         object_name: str,
         bucket_name: str = None

@@ -90,6 +90,8 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_SERVER_URL: "http://localhost:9000"
+      MINIO_BROWSER_REDIRECT_URL: "http://localhost:9001"
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -117,6 +119,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: jvb_frontend
+    env_file:
+      - ./frontend/.env
     ports:
       - "5173:5173"
     volumes:

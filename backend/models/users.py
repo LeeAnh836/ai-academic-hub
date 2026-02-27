@@ -15,6 +15,7 @@ class User(BaseModel):
     username = Column(String(100), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     full_name = Column(String(255), nullable=True)
+    avatar_url = Column(String(500), nullable=True)  # URL ảnh đại diện từ MinIO
     
     # Vai trò người dùng
     role = Column(String(20), default="user", nullable=False)  # user, admin

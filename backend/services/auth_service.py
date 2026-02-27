@@ -13,6 +13,7 @@ from utils.validators import is_valid_email, is_valid_username, sanitize_string
 from services.token_service import token_service
 from services.user_presence import user_presence
 from core.config import settings
+from schemas.jwt import create_jwt_user_data
 
 
 class AuthService:
@@ -221,11 +222,13 @@ class AuthService:
         db.refresh(user)
         
         # Tạo token pair và store mapping trong Redis
-        tokens = await token_service.create_token_pair({
-            "user_id": str(user.id),
-            "email": user.email,
-            "username": user.username,
-        })
+        tokens = await token_service.create_token_pair(
+            create_jwt_user_data(
+                user_id=str(user.id),
+                email=user.email,
+                username=user.username
+            )
+        )
         
         return {
             "user": user,

@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { useApp } from "@/lib/app-context"
+import { useNavigate } from "react-router-dom"
 import { getUserDisplayName } from "@/utils/user.utils"
 import { formatRelativeTime } from "@/utils/format.utils"
 import { useChatSessions } from "@/hooks/use-chat"
@@ -20,7 +21,8 @@ import { useDocuments } from "@/hooks/use-documents"
 import { useGroups } from "@/hooks/use-groups"
 
 export function DashboardPage() {
-  const { setCurrentPage, user } = useApp()
+  const { user } = useApp()
+  const navigate = useNavigate()
   const { sessions, loading: sessionsLoading } = useChatSessions(true)
   const { documents, loading: documentsLoading } = useDocuments(true)
   const { groups, loading: groupsLoading } = useGroups(true)
@@ -68,15 +70,15 @@ export function DashboardPage() {
 
       {/* Quick Actions */}
       <div className="flex flex-wrap gap-3">
-        <Button onClick={() => setCurrentPage("ai-chat")} className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
+        <Button onClick={() => navigate("/ai-chat")} className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
           <Plus className="h-4 w-4" />
           New AI Chat
         </Button>
-        <Button variant="outline" onClick={() => setCurrentPage("documents")} className="gap-2">
+        <Button variant="outline" onClick={() => navigate("/documents")} className="gap-2">
           <Upload className="h-4 w-4" />
           Upload File
         </Button>
-        <Button variant="outline" onClick={() => setCurrentPage("groups")} className="gap-2">
+        <Button variant="outline" onClick={() => navigate("/groups")} className="gap-2">
           <UserPlus className="h-4 w-4" />
           Create Group
         </Button>
@@ -91,7 +93,7 @@ export function DashboardPage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setCurrentPage("ai-chat")}
+              onClick={() => navigate("/ai-chat")}
               className="gap-1 text-xs text-muted-foreground"
             >
               View all <ArrowUpRight className="h-3 w-3" />
@@ -106,7 +108,7 @@ export function DashboardPage() {
               sessions.slice(0, 4).map((chat) => (
                 <button
                   key={chat.id}
-                  onClick={() => setCurrentPage("ai-chat")}
+                  onClick={() => navigate("/ai-chat")}
                   className="flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-secondary"
                 >
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent">
@@ -134,7 +136,7 @@ export function DashboardPage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setCurrentPage("documents")}
+              onClick={() => navigate("/documents")}
               className="gap-1 text-xs text-muted-foreground"
             >
               View all <ArrowUpRight className="h-3 w-3" />
@@ -176,7 +178,7 @@ export function DashboardPage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setCurrentPage("groups")}
+              onClick={() => navigate("/groups")}
               className="gap-1 text-xs text-muted-foreground"
             >
               View all <ArrowUpRight className="h-3 w-3" />

@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
+    # Cookie Settings for JWT
+    COOKIE_SECURE: bool = False  # Set to True in production with HTTPS
+    COOKIE_HTTPONLY: bool = True
+    COOKIE_SAMESITE: str = "lax"  # 'lax', 'strict', or 'none'
+    COOKIE_DOMAIN: Optional[str] = None  # None = current domain
+    
     # API Settings
     API_TITLE: str = "JVB API"
     API_DESCRIPTION: str = "AI-powered Java Virtual Bot API"
@@ -56,6 +62,7 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str
     MINIO_BUCKET_NAME: str = "jvb-documents"
     MINIO_SECURE: bool = False
+    MINIO_URL: str  # Public URL for accessing uploaded files (e.g., http://localhost:9000)
     
     # Qdrant Settings (Vector Database)
     QDRANT_HOST: str = "qdrant"

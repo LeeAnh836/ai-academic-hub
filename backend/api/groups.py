@@ -7,7 +7,7 @@ from typing import List
 from uuid import UUID
 
 from core.databases import get_db
-from api.dependencies import get_current_user
+from api.dependencies import get_current_user, CurrentUser
 from schemas.group import (
     GroupResponse, GroupCreateRequest, GroupUpdateRequest,
     GroupMemberAddRequest, GroupMessageCreateRequest, GroupDetailResponse,
@@ -16,7 +16,11 @@ from schemas.group import (
 from models.users import User
 from models.groups import Group, GroupMember, GroupMessage, GroupFile
 
-router = APIRouter(prefix="/api/groups", tags=["groups"])
+router = APIRouter(
+    prefix="/api/groups", 
+    tags=["groups"],
+    dependencies=[Depends(get_current_user)]  # Apply authentication to all endpoints
+)
 
 
 # ============================================
@@ -24,7 +28,7 @@ router = APIRouter(prefix="/api/groups", tags=["groups"])
 # ============================================
 @router.get("", response_model=List[GroupResponse])
 async def list_groups(
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db),
     skip: int = 0,
     limit: int = 10
@@ -46,7 +50,7 @@ async def list_groups(
 @router.post("", response_model=GroupResponse, status_code=status.HTTP_201_CREATED)
 async def create_group(
     request: GroupCreateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
     """
@@ -84,7 +88,7 @@ async def create_group(
 @router.get("/{group_id}", response_model=GroupDetailResponse)
 async def get_group(
     group_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
     """
@@ -122,7 +126,7 @@ async def get_group(
 async def update_group(
     group_id: UUID,
     request: GroupUpdateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
     """
@@ -171,7 +175,7 @@ async def update_group(
 async def add_group_member(
     group_id: UUID,
     request: GroupMemberAddRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
     """
@@ -244,7 +248,7 @@ async def add_group_member(
 async def send_group_message(
     group_id: UUID,
     request: GroupMessageCreateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
     """
@@ -293,7 +297,7 @@ async def send_group_message(
 @router.delete("/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_group(
     group_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
     db: Session = Depends(get_db)
 ):
     """

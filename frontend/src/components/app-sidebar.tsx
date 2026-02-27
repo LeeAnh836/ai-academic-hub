@@ -5,7 +5,6 @@ import {
   FileText,
   Users,
   Shield,
-  GraduationCap,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -13,28 +12,31 @@ import {
 import { cn } from "@/lib/utils"
 import { useApp } from "@/lib/app-context"
 import { useAuth } from "@/hooks/use-auth"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { useNavigate, useLocation } from "react-router-dom"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { getUserInitials, getUserDisplayName, getRoleLabel, isAdmin } from "@/utils/user.utils"
 import { useToast } from "@/hooks/use-toast"
 
 const navItems = [
-  { id: "dashboard" as const, label: "Dashboard", icon: LayoutDashboard },
-  { id: "ai-chat" as const, label: "AI Chat", icon: Bot },
-  { id: "messages" as const, label: "Messages", icon: MessageCircle, badge: 7 },
-  { id: "documents" as const, label: "Documents", icon: FileText },
-  { id: "groups" as const, label: "Groups", icon: Users },
+  { id: "dashboard" as const, label: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
+  { id: "ai-chat" as const, label: "AI Chat", icon: Bot, path: "/ai-chat" },
+  { id: "messages" as const, label: "Messages", icon: MessageCircle, badge: 7, path: "/messages" },
+  { id: "documents" as const, label: "Documents", icon: FileText, path: "/documents" },
+  { id: "groups" as const, label: "Groups", icon: Users, path: "/groups" },
 ]
 
 const adminItems = [
-  { id: "admin" as const, label: "Admin Panel", icon: Shield },
+  { id: "admin" as const, label: "Admin Panel", icon: Shield, path: "/admin" },
 ]
 
 export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
-  const { currentPage, setCurrentPage, user, setUser } = useApp()
+  const { user, setUser } = useApp()
   const { logout } = useAuth()
   const { toast } = useToast()
+  const navigate = useNavigate()
+  const location = useLocation()
   
   // Don't render if user is not loaded yet
   if (!user) {
@@ -87,10 +89,10 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
         {navItems.map((item) => (
           <button
             key={item.id}
-            onClick={() => setCurrentPage(item.id)}
+            onClick={() => navigate(item.path)}
             className={cn(
               "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-              currentPage === item.id
+              location.pathname === item.path
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:bg-secondary hover:text-foreground"
             )}
@@ -120,10 +122,10 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
             {adminItems.map((item) => (
               <button
                 key={item.id}
-                onClick={() => setCurrentPage(item.id)}
+                onClick={() => navigate(item.path)}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                  currentPage === item.id
+                  location.pathname === item.path
                     ? "bg-accent text-accent-foreground"
                     : "text-muted-foreground hover:bg-secondary hover:text-foreground"
                 )}
@@ -151,13 +153,19 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
       {/* User Profile */}
       <div className="border-t border-border p-3">
         <button
-          onClick={() => setCurrentPage("profile")}
+          onClick={() => navigate("/settings")}
           className={cn(
             "flex w-full items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-secondary",
-            currentPage === "profile" && "bg-accent"
+            location.pathname === "/settings" && "bg-accent"
           )}
         >
           <Avatar className="h-8 w-8 shrink-0">
+            {user.avatar_url && (
+              <AvatarImage 
+                src={`${user.avatar_url}?t=${new Date(user.updated_at || Date.now()).getTime()}`} 
+                alt={getUserDisplayName(user)} 
+              />
+            )}
             <AvatarFallback className="bg-primary text-primary-foreground text-xs">
               {getUserInitials(user)}
             </AvatarFallback>
