@@ -318,27 +318,45 @@ async def ask_in_chat_session(
     db.flush()  # Get ID without committing
     
     try:
-        # 3. Call AI Service internally
-        ai_service_url = f"{settings.AI_SERVICE_URL}/api/rag/query"
+        # 3. Call AI Service internally (Multi-Agent System)
+        ai_service_url = f"{settings.AI_SERVICE_URL}/api/agent/query"
         
         # Prepare request for AI Service
         # Logic: 
         # - document_ids=[] → Direct chat (no RAG)
-        # - document_ids=None → Use session's context_documents
-        # - document_ids=[...] → Use specified documents
+        # - document_ids=None → Use session's context_documents (no cross-session fallback)
+        # - document_ids=[...] → Use specified documents AND persist to session
         if request.document_ids is not None:
             # User explicitly specified (including [])
             doc_ids_to_use = [str(doc_id) for doc_id in request.document_ids] if request.document_ids else None
+            # Persist non-empty doc lists to session so follow-up questions remember context
+            if request.document_ids:
+                session.context_documents = [str(doc_id) for doc_id in request.document_ids]
+                db.flush()
         else:
-            # Use session's context_documents
-            doc_ids_to_use = [str(doc_id) for doc_id in session.context_documents] if session.context_documents else None
-        
+            # Use session's persistent context (no global cross-session fallback)
+            if session.context_documents:
+                doc_ids_to_use = [str(doc_id) for doc_id in session.context_documents]
+            else:
+                doc_ids_to_use = None
+
+        # Build chat history from last 6 DB messages for this session (for context continuity)
+        recent_messages = db.query(ChatMessage).filter(
+            ChatMessage.session_id == session_id
+        ).order_by(ChatMessage.created_at.desc()).limit(6).all()
+        chat_history_for_ai = [
+            {"role": m.role, "content": m.content}
+            for m in reversed(recent_messages)
+        ]
+
         ai_request = {
-            "question": request.question,
+            "query": request.question,
             "user_id": str(current_user.id),
+            "session_id": str(session_id),
             "document_ids": doc_ids_to_use,
             "top_k": request.top_k,
-            "score_threshold": request.score_threshold
+            "score_threshold": request.score_threshold,
+            "chat_history": chat_history_for_ai
         }
         
         # Add optional parameters
@@ -356,28 +374,32 @@ async def ask_in_chat_session(
             ai_response.raise_for_status()
             ai_data = ai_response.json()
         
-        # 4. Save AI response message
+        # 4. Save AI response message (Multi-Agent response format)
+        # Extract context information from metadata if available
+        metadata = ai_data.get("metadata", {})
+        retrieved_contexts = metadata.get("contexts", [])
+        
         ai_message = ChatMessage(
             session_id=session_id,
             user_id=current_user.id,
             role="assistant",
             content=ai_data["answer"],
-            retrieved_chunks=[ctx["chunk_id"] for ctx in ai_data.get("contexts", [])],
-            total_tokens=ai_data.get("tokens_used", 0),
-            confidence_score=None  # Could calculate from contexts scores
+            retrieved_chunks=[ctx.get("chunk_id", "") for ctx in retrieved_contexts],
+            total_tokens=metadata.get("tokens_used", 0),
+            confidence_score=None
         )
         db.add(ai_message)
         
         # 5. Update session stats
         session.message_count += 2  # User + AI messages
-        session.total_tokens_used += ai_data.get("tokens_used", 0)
+        session.total_tokens_used += metadata.get("tokens_used", 0)
         
         # 6. Track usage
         usage_record = AIUsageHistory(
             user_id=current_user.id,
             session_id=session_id,
-            model_name=ai_data.get("model", session.model_name),
-            tokens_used=ai_data.get("tokens_used", 0),
+            model_name=metadata.get("model", session.model_name),
+            tokens_used=metadata.get("tokens_used", 0),
             request_type="chat_message",
             status="success"
         )
@@ -391,18 +413,18 @@ async def ask_in_chat_session(
         # 7. Build response
         processing_time = time.time() - start_time
         
-        # Convert contexts to response format
+        # Convert contexts to response format (from metadata)
         contexts = [
             ContextChunkResponse(
-                chunk_id=ctx["chunk_id"],
-                document_id=ctx["document_id"],
-                chunk_text=ctx["chunk_text"],
-                chunk_index=ctx["chunk_index"],
-                score=ctx["score"],
-                file_name=ctx["file_name"],
+                chunk_id=ctx.get("chunk_id", ""),
+                document_id=ctx.get("document_id", ""),
+                chunk_text=ctx.get("chunk_text", ""),
+                chunk_index=ctx.get("chunk_index", 0),
+                score=ctx.get("score", 0.0),
+                file_name=ctx.get("file_name", ""),
                 title=ctx.get("title")
             )
-            for ctx in ai_data.get("contexts", [])
+            for ctx in retrieved_contexts
         ]
         
         return ChatAskResponse(
@@ -411,7 +433,7 @@ async def ask_in_chat_session(
             ai_message=ai_message,
             contexts=contexts,
             processing_time=processing_time,
-            model_used=ai_data.get("model", session.model_name)
+            model_used=metadata.get("model", session.model_name)
         )
     
     except httpx.HTTPError as e:

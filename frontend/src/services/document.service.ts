@@ -94,4 +94,12 @@ export const documentService = {
   }> => {
     return api.get(`/api/documents/${documentId}/status`)
   },
+
+  // Check batch processing status for multiple documents at once
+  checkBatchProcessingStatus: async (
+    documentIds: string[]
+  ): Promise<Array<{ id: string; is_processed: boolean; processing_status: string }>> => {
+    if (!documentIds.length) return []
+    return api.get(`/api/documents/batch-status?document_ids=${documentIds.join(',')}`)
+  },
 }

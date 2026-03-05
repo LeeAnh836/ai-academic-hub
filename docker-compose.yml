@@ -77,9 +77,12 @@ services:
       - ./ai-service/.env
     volumes:
       - ./ai-service:/app
+      - /var/run/docker.sock:/var/run/docker.sock  # For code execution
     depends_on:
       qdrant:
         condition: service_started
+      redis:
+        condition: service_healthy
     networks:
       - jvb_network
 

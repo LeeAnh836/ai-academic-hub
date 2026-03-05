@@ -21,8 +21,8 @@ import { useToast } from "@/hooks/use-toast"
 import { useState } from "react"
 
 const bottomNavItems = [
-  { id: "dashboard" as const, label: "Home", icon: LayoutDashboard, path: "/dashboard" },
   { id: "ai-chat" as const, label: "AI Chat", icon: Bot, path: "/ai-chat" },
+  { id: "dashboard" as const, label: "Home", icon: LayoutDashboard, path: "/dashboard" },
   { id: "messages" as const, label: "Messages", icon: MessageCircle, badge: 7, path: "/messages" },
   { id: "documents" as const, label: "Files", icon: FileText, path: "/documents" },
   { id: "groups" as const, label: "Groups", icon: Users, path: "/groups" },

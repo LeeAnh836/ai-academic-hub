@@ -1,0 +1,73 @@
+Hệ thống JVB: Nền tảng học tập AI thông minh
+
+Dự án JVB được phát triển bởi Nguyễn Văn An, một kỹ sư phần mềm tại công ty TechVietnam. 
+Ông An tốt nghiệp từ Đại học Bách Khoa Hà Nội chuyên ngành Khoa học máy tính và có 5 năm 
+kinh nghiệm trong lĩnh vực AI và Machine Learning.
+
+Kiến trúc hệ thống
+
+JVB sử dụng kiến trúc microservices với các thành phần chính:
+- Frontend: React với TypeScript, sử dụng Vite làm build tool
+- Backend: FastAPI framework của Python, xử lý authentication và business logic
+- AI Service: FastAPI xử lý RAG (Retrieval Augmented Generation) và GraphRAG
+
+Cơ sở dữ liệu
+
+Hệ thống sử dụng nhiều loại database:
+1. PostgreSQL: Lưu trữ user data, documents, conversations
+2. Qdrant: Vector database cho semantic search
+3. Neo4j Aura: Graph database cho GraphRAG và entity relationships
+4. Redis: Cache và session management
+
+Công nghệ AI
+
+JVB tích hợp nhiều mô hình AI:
+- Gemini 1.5 Flash: Model chính cho text generation, được phát triển bởi Google
+- Gemini 1.5 Pro: Model advanced cho complex reasoning
+- Groq: Làm fallback provider với Llama 3.3 70B model
+- Cohere: Embedding model embed-multilingual-v3.0 cho tiếng Việt
+
+GraphRAG Implementation
+
+Trần Thị Bình, data scientist tại TechVietnam, đã thiết kế GraphRAG system. 
+Hệ thống trích xuất entities như PERSON, ORGANIZATION, TECHNOLOGY, CONCEPT từ documents.
+Neo4j Aura được chọn vì:
+- Free tier với 200K nodes
+- Cloud-based, không cần maintain infrastructure
+- Cypher query language mạnh mẽ
+
+Relationships trong knowledge graph:
+- USES: Docker USES Container technology
+- PART_OF: React PART_OF Frontend
+- CREATED_BY: JVB CREATED_BY Nguyễn Văn An
+- WORKS_WITH: Nguyễn Văn An WORKS_WITH Trần Thị Bình
+
+Team phát triển
+
+Ngoài Nguyễn Văn An và Trần Thị Bình, team còn có:
+- Lê Văn Cường: DevOps Engineer, chịu trách nhiệm Docker và CI/CD
+- Phạm Thu Hằng: UX/UI Designer từ Đại học FPT
+- Hoàng Minh Tuấn: Backend Developer, expert về PostgreSQL
+
+Công ty TechVietnam
+
+TechVietnam được thành lập năm 2020 bởi CEO Đỗ Thị Mai. Công ty chuyên về 
+AI Solutions và có văn phòng tại Hà Nội và TP. Hồ Chí Minh. TechVietnam hợp tác 
+với nhiều trường đại học như Bách Khoa, FPT, PTIT để phát triển các sản phẩm giáo dục.
+
+Sản phẩm
+
+JVB hỗ trợ:
+- Document Q&A với RAG
+- Homework solver
+- Code execution với Docker containers
+- Data analysis với Pandas
+- Chart generation với Matplotlib
+
+Future plans
+
+Team đang research thêm về:
+- Multi-modal AI với vision models
+- Voice interaction với text-to-speech
+- Mobile app development với React Native
+- Integration với Notion API và Slack

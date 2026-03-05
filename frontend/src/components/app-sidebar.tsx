@@ -20,8 +20,8 @@ import { getUserInitials, getUserDisplayName, getRoleLabel, isAdmin } from "@/ut
 import { useToast } from "@/hooks/use-toast"
 
 const navItems = [
-  { id: "dashboard" as const, label: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
   { id: "ai-chat" as const, label: "AI Chat", icon: Bot, path: "/ai-chat" },
+  { id: "dashboard" as const, label: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
   { id: "messages" as const, label: "Messages", icon: MessageCircle, badge: 7, path: "/messages" },
   { id: "documents" as const, label: "Documents", icon: FileText, path: "/documents" },
   { id: "groups" as const, label: "Groups", icon: Users, path: "/groups" },

@@ -43,7 +43,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!user || !isAdmin(user)) {
-    return <Navigate to="/dashboard" replace />
+    return <Navigate to="/ai-chat" replace />
   }
 
   return <>{children}</>
@@ -67,7 +67,7 @@ export function AppRoutes() {
       <Route
         path="/login"
         element={
-          isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage />
+          isAuthenticated ? <Navigate to="/ai-chat" replace /> : <LoginPage />
         }
       />
 
@@ -76,7 +76,7 @@ export function AppRoutes() {
         path="/"
         element={
           <ProtectedRoute>
-            <Navigate to="/dashboard" replace />
+            <Navigate to="/ai-chat" replace />
           </ProtectedRoute>
         }
       />
@@ -145,8 +145,8 @@ export function AppRoutes() {
         }
       />
 
-      {/* Catch all - redirect to dashboard */}
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      {/* Catch all - redirect to ai-chat */}
+      <Route path="*" element={<Navigate to="/ai-chat" replace />} />
     </Routes>
   )
 }

@@ -12,6 +12,13 @@ from services.embedding_service import embedding_service
 from core.qdrant import qdrant_manager
 from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny
 
+# Import Hybrid RAG if GraphRAG is enabled
+try:
+    from services.hybrid_rag_service import hybrid_rag_service
+    HYBRID_RAG_AVAILABLE = True
+except ImportError:
+    HYBRID_RAG_AVAILABLE = False
+
 
 class AIOrchestrator:
     """
@@ -219,12 +226,33 @@ YÊU CẦU QUAN TRỌNG:
             )
             
             if not contexts:
-                return {
-                    "answer": "Tôi không tìm thấy thông tin phù hợp trong tài liệu của bạn. Vui lòng thử câu hỏi khác hoặc upload thêm tài liệu.",
-                    "contexts": [],
-                    "model": "none",
-                    "tokens_used": 0
-                }
+                # SMART NO-CONTEXT MESSAGE
+                if document_ids:
+                    # User has documents but no match found
+                    return {
+                        "answer": "🔍 Tôi không tìm thấy thông tin phù hợp với câu hỏi của bạn trong tài liệu đã chỉ định.\n\n"
+                                  "**Gợi ý:**\n"
+                                  "- Thử diễn đạt câu hỏi khác đi\n"
+                                  "- Hỏi về các chủ đề có trong tài liệu\n"
+                                  "- Hoặc hỏi tôi trực tiếp nếu đây là câu hỏi chung không liên quan đến tài liệu",
+                        "contexts": [],
+                        "model": "none",
+                        "tokens_used": 0
+                    }
+                else:
+                    # No documents specified - guide user
+                    return {
+                        "answer": "📚 **Tôi cần tài liệu để trả lời câu hỏi này!**\n\n"
+                                  "Có vẻ như bạn đang hỏi về một tài liệu cụ thể, nhưng tôi chưa thấy tài liệu nào.\n\n"
+                                  "**Cách khắc phục:**\n"
+                                  "1. Upload tài liệu lên hệ thống\n"
+                                  "2. Đợi xử lý hoàn tất (icon ✓ xanh)\n"
+                                  "3. Hỏi lại câu hỏi\n\n"
+                                  "**Hoặc:** Nếu đây là câu hỏi chung (không liên quan đến tài liệu), bạn có thể hỏi trực tiếp mà không cần file!",
+                        "contexts": [],
+                        "model": "none",
+                        "tokens_used": 0
+                    }
             
             # Log contexts found
             scores_preview = ", ".join([f"{c['score']:.2f}" for c in contexts[:3]])
@@ -619,8 +647,28 @@ HƯỚNG DẪN:"""
         top_k: int,
         score_threshold: float
     ) -> List[Dict[str, Any]]:
-        """Retrieve contexts from Qdrant"""
+        """
+        Retrieve contexts using Hybrid RAG (if enabled) or Vector RAG only
+        
+        Hybrid RAG combines:
+        - Vector search (Qdrant): Semantic similarity
+        - Graph search (Neo4j): Entity relationships
+        """
         try:
+            # Use Hybrid RAG if GraphRAG is enabled
+            if HYBRID_RAG_AVAILABLE and settings.ENABLE_GRAPH_RAG:
+                print("🔀 Using Hybrid RAG (Vector + Graph)")
+                return await hybrid_rag_service.hybrid_retrieve(
+                    query=query,
+                    user_id=user_id,
+                    document_ids=document_ids,
+                    top_k=top_k,
+                    score_threshold=score_threshold
+                )
+            
+            # Fallback to Vector RAG only (original implementation)
+            print("📊 Using Vector RAG only")
+            
             # Generate query embedding
             query_vector = embedding_service.embed_query(query)
             
@@ -668,7 +716,8 @@ HƯỚNG DẪN:"""
                     "chunk_index": result.payload.get("chunk_index", 0),
                     "document_id": result.payload.get("document_id", ""),
                     "file_name": result.payload.get("file_name", ""),
-                    "title": result.payload.get("title", "")
+                    "title": result.payload.get("title", ""),
+                    "source": "vector"
                 })
             
             return contexts

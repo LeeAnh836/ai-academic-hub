@@ -8,6 +8,8 @@ import json
 
 from services.document_service import document_processing_service
 from services.embedding_service import embedding_service
+from services.graph_rag_service import graph_rag_service
+from core.config import settings
 
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
@@ -82,7 +84,25 @@ async def process_document(
             metadata=meta
         )
         
-        # 7. Return chunk data to Backend for PostgreSQL storage
+        # 7. Index to Neo4j for GraphRAG (only when enabled)
+        graph_stats = {}
+        if settings.ENABLE_GRAPH_RAG and settings.ENABLE_NEO4J:
+            try:
+                graph_stats = await graph_rag_service.index_document_to_graph(
+                    document_id=document_id,
+                    user_id=user_id,
+                    chunks=chunks,
+                    file_name=file.filename,
+                    metadata=meta
+                )
+                print(f"✅ Graph indexed: {graph_stats.get('entities_extracted', 0)} entities, "
+                      f"{graph_stats.get('relationships_created', 0)} relationships")
+            except Exception as graph_err:
+                # Graph indexing failure must NOT block Qdrant result
+                print(f"⚠️ Graph indexing skipped (non-fatal): {graph_err}")
+                graph_stats = {"error": str(graph_err)}
+        
+        # 8. Return chunk data to Backend for PostgreSQL storage
         chunks_for_backend = [
             {
                 "chunk_id": chunk_id,
@@ -99,6 +119,8 @@ async def process_document(
             "message": "Document processed successfully",
             "chunks_count": len(chunks),
             "vectors_count": len(embeddings),
+            "graph_indexed": bool(graph_stats.get("success")),
+            "graph_stats": graph_stats,
             "chunks": chunks_for_backend  # ← TRẢ VỀ CHUNK DATA
         }
     

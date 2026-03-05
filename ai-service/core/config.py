@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: Optional[str] = None
     QDRANT_GRPC_PORT: int = 6334
     
+    # Neo4j Settings (Graph Database for GraphRAG)
+    NEO4J_URI: Optional[str] = None  # e.g., "neo4j+s://xxxxx.databases.neo4j.io"
+    NEO4J_USERNAME: Optional[str] = None  # Usually "neo4j"
+    NEO4J_PASSWORD: Optional[str] = None
+    NEO4J_DATABASE: str = "neo4j"  # Default database name
+    ENABLE_NEO4J: bool = False  # Enable after setup
+    
     # Cohere Settings (Embeddings & LLM)
     COHERE_API_KEY: str
     COHERE_EMBEDDING_MODEL: str = "embed-multilingual-v3.0"
@@ -50,6 +57,14 @@ class Settings(BaseSettings):
     RAG_MAX_CONTEXT_LENGTH: int = 8000
     RAG_ENABLE_FALLBACK: bool = True  # Enable fallback retrieval
     
+    # GraphRAG Settings
+    ENABLE_GRAPH_RAG: bool = False  # Enable after Neo4j setup
+    GRAPH_RAG_MODE: str = "hybrid"  # "vector_only", "graph_only", "hybrid"
+    GRAPH_EXTRACTION_MODEL: str = "gemini"  # Use Gemini Flash for free entity extraction
+    GRAPH_MAX_ENTITIES: int = 50  # Max entities to extract per chunk
+    GRAPH_TOP_K: int = 10  # Top K related entities from graph
+    GRAPH_TRAVERSAL_DEPTH: int = 2  # How deep to traverse relationships
+    
     # Intent Classification
     ENABLE_INTENT_CLASSIFICATION: bool = True
     ENABLE_DIRECT_CHAT: bool = True  # Allow chat without documents
@@ -62,6 +77,35 @@ class Settings(BaseSettings):
     # Chunking Settings
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 200
+    
+    # Redis Settings (Memory Management)
+    REDIS_HOST: str = "redis"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
+    REDIS_PASSWORD: Optional[str] = None
+    MEMORY_TTL: int = 3600  # 1 hour session timeout
+    
+    # Multi-Agent Settings
+    ENABLE_MULTI_AGENT: bool = True
+    ENABLE_PROMPT_PREPROCESSING: bool = True
+    ENABLE_DATA_ANALYSIS: bool = True
+    ENABLE_CODE_EXECUTION: bool = True
+    
+    # Code Execution Settings
+    # Code Execution Settings
+    DOCKER_HOST: str = "unix:///var/run/docker.sock"
+    CODE_EXEC_TIMEOUT: int = 30  # 30 seconds
+    CODE_EXEC_DOCKER_IMAGE: str = "python:3.11-slim"
+    CODE_EXEC_MAX_OUTPUT_SIZE: int = 10000  # 10KB
+    
+    # Data Analysis Settings
+    PANDAS_MAX_ROWS: int = 10000
+    PANDAS_MAX_COLUMNS: int = 100
+    ENABLE_CHART_GENERATION: bool = True
+    
+    # MCP Settings (Model Context Protocol)
+    ENABLE_MCP: bool = False  # Will enable after setup
+    MCP_SERVER_URL: Optional[str] = None
     
     # CORS Settings
     CORS_ORIGINS: str = "*"

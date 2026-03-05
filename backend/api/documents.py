@@ -1,7 +1,7 @@
 """
 Document routes - CRUD operations
 """
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from uuid import UUID
@@ -63,6 +63,43 @@ async def list_documents(
 
 
 # ============================================
+# Batch processing status check
+# ============================================
+@router.get("/batch-status")
+async def get_batch_document_status(
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),
+    document_ids: str = Query(..., description="Comma-separated document IDs"),
+):
+    """
+    Kiểm tra trạng thái xử lý của nhiều documents cùng lúc.
+    Trả về danh sách {id, is_processed, processing_status}.
+    """
+    ids_raw = [i.strip() for i in document_ids.split(",") if i.strip()]
+    if not ids_raw:
+        return []
+
+    try:
+        parsed_ids = [UUID(i) for i in ids_raw]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid document ID format")
+
+    docs = db.query(Document).filter(
+        Document.id.in_(parsed_ids),
+        Document.user_id == current_user.id
+    ).all()
+
+    return [
+        {
+            "id": str(doc.id),
+            "is_processed": doc.is_processed,
+            "processing_status": doc.processing_status
+        }
+        for doc in docs
+    ]
+
+
+# ============================================
 # Upload document file
 # ============================================
 @router.post("/upload", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
@@ -106,10 +143,19 @@ async def upload_document(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"File type {file.content_type} not supported. Allowed: PDF, DOCX, TXT"
         )
+
+    # Validate file size (max 20 MB)
+    MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB in bytes
     
     try:
         # 1. Upload file to MinIO
         file_data = await file.read()
+
+        if len(file_data) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File quá lớn. Kích thước tối đa là 20 MB (file hiện tại: {len(file_data) / (1024*1024):.1f} MB)"
+            )
         upload_result = minio_service.upload_file(
             file_data=file_data,
             file_name=file.filename,
@@ -339,7 +385,8 @@ async def delete_document(
         # 1. Delete vectors from Qdrant (if processed)
         if document.is_processed:
             await ai_service.delete_document_vectors(document_id, db)
-        minio_service.delete_file(object_name)
+        # 2. Delete file from MinIO using stored file_path
+        minio_service.delete_file(document.file_path)
         
         # 3. Delete from PostgreSQL (cascade will delete chunks & embeddings)
         db.delete(document)
