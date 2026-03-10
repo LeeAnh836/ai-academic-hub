@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Slider } from "@/components/ui/slider"
 import { useToast } from "@/hooks/use-toast"
+import { useTranslation } from "@/lib/i18n"
 import { userService } from "@/services/user.service"
 import { getCroppedImg, type Area } from "@/utils/cropImage"
 
@@ -26,6 +27,7 @@ export function AvatarUpload({ currentAvatarUrl, userInitials, onAvatarUpdated }
   const [avatarTimestamp, setAvatarTimestamp] = useState(Date.now())
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
+  const { t } = useTranslation()
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -34,8 +36,8 @@ export function AvatarUpload({ currentAvatarUrl, userInitials, onAvatarUpdated }
     // Validate file type
     if (!file.type.startsWith('image/')) {
       toast({
-        title: "Invalid file type",
-        description: "Please select an image file",
+        title: t("avatar.invalidType"),
+        description: t("avatar.invalidTypeDesc"),
         variant: "destructive",
       })
       return
@@ -44,8 +46,8 @@ export function AvatarUpload({ currentAvatarUrl, userInitials, onAvatarUpdated }
     // Validate file size (5MB)
     if (file.size > 5 * 1024 * 1024) {
       toast({
-        title: "File too large",
-        description: "Please select an image smaller than 5MB",
+        title: t("avatar.tooLarge"),
+        description: t("avatar.tooLargeDesc"),
         variant: "destructive",
       })
       return
@@ -81,8 +83,8 @@ export function AvatarUpload({ currentAvatarUrl, userInitials, onAvatarUpdated }
       const updatedUser = await userService.uploadAvatar(croppedFile)
       
       toast({
-        title: "Success",
-        description: "Avatar updated successfully",
+        title: t("common.success"),
+        description: t("avatar.success"),
       })
 
       setAvatarTimestamp(Date.now())
@@ -91,8 +93,8 @@ export function AvatarUpload({ currentAvatarUrl, userInitials, onAvatarUpdated }
       handleCancel()
     } catch (error: any) {
       toast({
-        title: "Error",
-        description: error.message || "Failed to upload avatar",
+        title: t("common.error"),
+        description: error.message || t("avatar.failed"),
         variant: "destructive",
       })
     } finally {
@@ -144,9 +146,9 @@ export function AvatarUpload({ currentAvatarUrl, userInitials, onAvatarUpdated }
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Upload Avatar</DialogTitle>
+            <DialogTitle>{t("avatar.uploadTitle")}</DialogTitle>
             <DialogDescription>
-              Adjust the crop area and zoom to select your avatar (Max 5MB)
+              {t("avatar.uploadDesc")}
             </DialogDescription>
           </DialogHeader>
           
@@ -170,7 +172,7 @@ export function AvatarUpload({ currentAvatarUrl, userInitials, onAvatarUpdated }
 
                 {/* Zoom Slider */}
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Zoom</label>
+                  <label className="text-sm font-medium">{t("avatar.zoom")}</label>
                   <Slider
                     value={[zoom]}
                     min={1}
@@ -192,12 +194,12 @@ export function AvatarUpload({ currentAvatarUrl, userInitials, onAvatarUpdated }
                 {uploading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Uploading...
+                    {t("avatar.uploading")}
                   </>
                 ) : (
                   <>
                     <Upload className="mr-2 h-4 w-4" />
-                    Upload
+                    {t("common.upload")}
                   </>
                 )}
               </Button>
@@ -207,12 +209,12 @@ export function AvatarUpload({ currentAvatarUrl, userInitials, onAvatarUpdated }
                 disabled={uploading}
               >
                 <X className="mr-2 h-4 w-4" />
-                Cancel
+                {t("common.cancel")}
               </Button>
             </div>
 
             <p className="text-xs text-muted-foreground text-center">
-              Supported formats: JPG, PNG, GIF, WebP (Max 5MB)
+              {t("avatar.supportedFormats")}
             </p>
           </div>
         </DialogContent>

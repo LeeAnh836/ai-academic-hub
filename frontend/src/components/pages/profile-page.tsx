@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useTheme } from "next-themes"
 import { User, Mail, Lock, Camera, Moon, Sun, Eye, EyeOff, Save, Award as IdCard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -7,14 +8,17 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { useApp } from "@/lib/app-context"
+import { useTranslation } from "@/lib/i18n"
 import { getUserInitials, getUserDisplayName, getRoleLabel, formatStudentId } from "@/utils/user.utils"
 import { useCurrentUser } from "@/hooks/use-auth"
 
 export function ProfilePage() {
   const { user } = useApp()
+  const { t } = useTranslation()
   const { updateUser } = useCurrentUser()
+  const { theme, setTheme } = useTheme()
   const [showPassword, setShowPassword] = useState(false)
-  const [darkMode, setDarkMode] = useState(false)
+  const [darkMode, setDarkMode] = useState(theme === "dark")
   const [fullName, setFullName] = useState(user?.full_name || "")
   const [isUpdating, setIsUpdating] = useState(false)
   
@@ -33,19 +37,15 @@ export function ProfilePage() {
 
   const toggleTheme = (checked: boolean) => {
     setDarkMode(checked)
-    if (checked) {
-      document.documentElement.classList.add("dark")
-    } else {
-      document.documentElement.classList.remove("dark")
-    }
+    setTheme(checked ? "dark" : "light") // persist via next-themes → localStorage
   }
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-4 md:p-6 lg:p-8">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Profile & Settings</h1>
-        <p className="text-sm text-muted-foreground">Manage your account and preferences</p>
+        <h1 className="text-2xl font-bold text-foreground">{t("profile.title")}</h1>
+        <p className="text-sm text-muted-foreground">{t("profile.subtitle")}</p>
       </div>
 
       {/* Avatar & Name */}
@@ -63,10 +63,10 @@ export function ProfilePage() {
               </button>
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-foreground">{getUserDisplayName(user)}</h2>
+              <h2 className="text-lg font-semibold text-foreground">{getUserDisplayName(user, t)}</h2>
               <p className="text-sm text-muted-foreground">{user.email}</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {getRoleLabel(user.role)} &middot; {formatStudentId(user.student_id)}
+                {getRoleLabel(user.role, t)} &middot; {formatStudentId(user.student_id, t)}
               </p>
             </div>
           </div>
@@ -76,12 +76,12 @@ export function ProfilePage() {
       {/* Personal Information */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base text-foreground">Personal Information</CardTitle>
+          <CardTitle className="text-base text-foreground">{t("profile.personalInfo")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <Label className="text-sm text-foreground">Full Name</Label>
+              <Label className="text-sm text-foreground">{t("profile.fullName")}</Label>
               <div className="relative mt-1">
                 <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input 
@@ -92,7 +92,7 @@ export function ProfilePage() {
               </div>
             </div>
             <div>
-              <Label className="text-sm text-foreground">Email</Label>
+              <Label className="text-sm text-foreground">{t("profile.email")}</Label>
               <div className="relative mt-1">
                 <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input value={user.email} className="bg-secondary pl-9" readOnly />
@@ -100,10 +100,10 @@ export function ProfilePage() {
             </div>
           </div>
           <div>
-            <Label className="text-sm text-foreground">Student ID</Label>
+            <Label className="text-sm text-foreground">{t("profile.studentId")}</Label>
             <div className="relative mt-1">
               <IdCard className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={formatStudentId(user.student_id)} className="bg-secondary pl-9" readOnly />
+              <Input value={formatStudentId(user.student_id, t)} className="bg-secondary pl-9" readOnly />
             </div>
           </div>
           <Button 
@@ -112,7 +112,7 @@ export function ProfilePage() {
             disabled={isUpdating}
           >
             <Save className="h-4 w-4" />
-            {isUpdating ? "Saving..." : "Save Changes"}
+            {isUpdating ? t("common.saving") : t("common.save")}
           </Button>
         </CardContent>
       </Card>
@@ -120,16 +120,16 @@ export function ProfilePage() {
       {/* Change Password */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base text-foreground">Change Password</CardTitle>
+          <CardTitle className="text-base text-foreground">{t("profile.changePassword")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
-            <Label className="text-sm text-foreground">Current Password</Label>
+            <Label className="text-sm text-foreground">{t("profile.currentPassword")}</Label>
             <div className="relative mt-1">
               <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 type={showPassword ? "text" : "password"}
-                placeholder="Enter current password"
+                placeholder={t("profile.currentPasswordPlaceholder")}
                 className="bg-secondary pl-9 pr-9"
               />
               <button
@@ -143,23 +143,23 @@ export function ProfilePage() {
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <Label className="text-sm text-foreground">New Password</Label>
+              <Label className="text-sm text-foreground">{t("profile.newPassword")}</Label>
               <div className="relative mt-1">
                 <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input type="password" placeholder="New password" className="bg-secondary pl-9" />
+                <Input type="password" placeholder={t("profile.newPasswordPlaceholder")} className="bg-secondary pl-9" />
               </div>
             </div>
             <div>
-              <Label className="text-sm text-foreground">Confirm Password</Label>
+              <Label className="text-sm text-foreground">{t("profile.confirmPassword")}</Label>
               <div className="relative mt-1">
                 <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input type="password" placeholder="Confirm password" className="bg-secondary pl-9" />
+                <Input type="password" placeholder={t("profile.confirmPasswordPlaceholder")} className="bg-secondary pl-9" />
               </div>
             </div>
           </div>
           <Button className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
             <Lock className="h-4 w-4" />
-            Update Password
+            {t("profile.updatePassword")}
           </Button>
         </CardContent>
       </Card>
@@ -167,15 +167,15 @@ export function ProfilePage() {
       {/* Preferences */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base text-foreground">Preferences</CardTitle>
+          <CardTitle className="text-base text-foreground">{t("profile.preferences")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               {darkMode ? <Moon className="h-5 w-5 text-muted-foreground" /> : <Sun className="h-5 w-5 text-muted-foreground" />}
               <div>
-                <p className="text-sm font-medium text-foreground">Dark Mode</p>
-                <p className="text-xs text-muted-foreground">Switch between light and dark theme</p>
+                <p className="text-sm font-medium text-foreground">{t("profile.darkMode")}</p>
+                <p className="text-xs text-muted-foreground">{t("profile.darkModeDesc")}</p>
               </div>
             </div>
             <Switch checked={darkMode} onCheckedChange={toggleTheme} />

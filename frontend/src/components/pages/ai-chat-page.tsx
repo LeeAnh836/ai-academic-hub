@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   DropdownMenu,
@@ -32,6 +32,7 @@ import { useToast } from "@/hooks/use-toast"
 import { MarkdownMessage } from "@/components/markdown-message"
 import { documentService } from "@/services/document.service"
 import type { ChatMessage } from "@/types/api"
+import { useTranslation } from "@/lib/i18n"
 
 // Extended local message type for optimistic updates and file display
 type AttachedFileInfo = {
@@ -71,7 +72,7 @@ export function AIChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragCounterRef = useRef(0)
   const { toast } = useToast()
-
+  const { t } = useTranslation()
   const { sessions, loading: sessionsLoading, createSession, deleteSession } = useChatSessions()
   const { messages, loading: messagesLoading, refetch: refetchMessages } = useChatMessages(selectedChat)
   const { askInSession } = useChatAsk()
@@ -124,18 +125,18 @@ export function AIChatPage() {
 
     for (const file of files) {
       if (!ALLOWED_MIME.includes(file.type)) {
-        errors.push(`"${file.name}" không được hỗ trợ (chỉ PDF, DOCX, TXT)`)
+        errors.push(t("aiChat.fileNotSupported", { name: file.name }))
         continue
       }
       if (file.size > MAX_FILE_SIZE_BYTES) {
-        errors.push(`"${file.name}" vượt quá ${MAX_FILE_SIZE_MB} MB`)
+        errors.push(t("aiChat.fileTooBig", { name: file.name, size: MAX_FILE_SIZE_MB }))
         continue
       }
       accepted.push(file)
     }
 
     if (errors.length) {
-      toast({ title: 'File không hợp lệ', description: errors.join('\n'), variant: 'destructive' })
+      toast({ title: t("aiChat.invalidFile"), description: errors.join('\n'), variant: 'destructive' })
     }
 
     if (accepted.length) {
@@ -143,8 +144,8 @@ export function AIChatPage() {
         const combined = [...prev, ...accepted]
         if (combined.length > MAX_FILES) {
           toast({
-            title: 'Giới hạn file',
-            description: `Chỉ được đính kèm tối đa ${MAX_FILES} file. ${combined.length - MAX_FILES} file bị bỏ qua.`,
+            title: t("aiChat.fileLimit"),
+            description: t("aiChat.fileLimitDesc", { n: MAX_FILES }),
             variant: 'destructive',
           })
         }
@@ -167,13 +168,13 @@ export function AIChatPage() {
         handleNewChat()
       }
       toast({
-        title: "Success",
-        description: "Chat session deleted",
+        title: t("common.success"),
+        description: t("aiChat.chatDeleted"),
       })
     } catch (error: any) {
       toast({
-        title: "Error",
-        description: error.message || "Failed to delete session",
+        title: t("common.error"),
+        description: error.message || t("aiChat.failedDelete"),
         variant: "destructive",
       })
     }
@@ -274,7 +275,7 @@ export function AIChatPage() {
       if (isDraftMode || !selectedChat) {
         isNewSession = true
         const firstFileName = currentFiles[0]?.name
-        const autoTitle = generateTitle(userMessage || firstFileName || "File chat")
+        const autoTitle = generateTitle(userMessage || firstFileName || t("aiChat.fileChat"))
         const newSession = await createSession({
           title: autoTitle,
           session_type: "general",
@@ -310,7 +311,7 @@ export function AIChatPage() {
 
         if (failedFiles.length) {
           toast({
-            title: "Một số file không upload được",
+            title: t("aiChat.someUploadsFailed"),
             description: failedFiles.join(", "),
             variant: "destructive",
           })
@@ -325,7 +326,7 @@ export function AIChatPage() {
           setLocalMessages((prev) =>
             prev.map((m) =>
               m.id === optimisticAiId
-                ? { ...m, content: "⏳ Đang xử lý file..." }
+                ? { ...m, content: t("aiChat.processingFiles") }
                 : m
             )
           )
@@ -382,8 +383,8 @@ export function AIChatPage() {
         prev.filter((m) => m.id !== optimisticUserId && m.id !== optimisticAiId)
       )
       toast({
-        title: "Error",
-        description: error.message || "Failed to send message",
+        title: t("common.error"),
+        description: error.message || t("aiChat.failedSend"),
         variant: "destructive",
       })
       setMessage(userMessage)
@@ -391,17 +392,6 @@ export function AIChatPage() {
     } finally {
       setIsSending(false)
     }
-  }
-
-  const formatTimestamp = (timestamp: string) => {
-    const date = new Date(timestamp)
-    const now = new Date()
-    const diffMins = Math.floor((now.getTime() - date.getTime()) / 60000)
-    if (diffMins < 1) return "Just now"
-    if (diffMins < 60) return `${diffMins}m ago`
-    const diffHours = Math.floor(diffMins / 60)
-    if (diffHours < 24) return `${diffHours}h ago`
-    return date.toLocaleDateString()
   }
 
   const formatFileSize = (bytes: number) => {
@@ -417,21 +407,21 @@ export function AIChatPage() {
       <div
         className={cn(
           "flex flex-col border-r border-border bg-card transition-all duration-300",
-          historyCollapsed ? "w-0 md:w-[68px]" : "w-full md:w-[300px] lg:w-[320px]",
+          historyCollapsed ? "w-0 md:w-[68px] overflow-hidden" : "w-full md:w-[300px] lg:w-[320px]",
           selectedChat && "hidden md:flex"
         )}
       >
         {/* Header */}
         <div className="flex h-14 items-center justify-between border-b border-border px-4 shrink-0">
           {!historyCollapsed && (
-            <h2 className="font-semibold text-foreground whitespace-nowrap">AI Chats</h2>
+            <h2 className="font-semibold text-foreground whitespace-nowrap">{t("aiChat.title")}</h2>
           )}
           <Button
             size="icon"
             variant="ghost"
             className={cn("h-8 w-8 text-muted-foreground shrink-0", historyCollapsed && "mx-auto")}
             onClick={() => setHistoryCollapsed(!historyCollapsed)}
-            title={historyCollapsed ? "Mở rộng lịch sử" : "Thu gọn lịch sử trò chuyện"}
+            title={historyCollapsed ? t("aiChat.expandHistory") : t("aiChat.collapseHistory")}
           >
             <Menu className="h-4 w-4" />
           </Button>
@@ -443,7 +433,7 @@ export function AIChatPage() {
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Search conversations..."
+                placeholder={t("aiChat.searchConversations")}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="h-9 bg-secondary pl-9 text-sm"
@@ -456,7 +446,7 @@ export function AIChatPage() {
               onClick={handleNewChat}
             >
               <Plus className="h-4 w-4" />
-              <span>Thêm đoạn chat mới</span>
+              <span>{t("aiChat.addNewChat")}</span>
             </Button>
           </div>
         )}
@@ -467,7 +457,7 @@ export function AIChatPage() {
               size="icon"
               variant="outline"
               className="w-full h-10"
-              title="Thêm đoạn chat mới"
+              title={t("aiChat.addNewChat")}
               onClick={handleNewChat}
             >
               <Plus className="h-4 w-4" />
@@ -485,7 +475,7 @@ export function AIChatPage() {
                 </div>
               ) : filteredConversations.length === 0 ? (
                 <div className="p-4 text-center text-sm text-muted-foreground">
-                  No chats yet. Start a new conversation!
+                  {t("aiChat.noChats")}
                 </div>
               ) : (
                 <div className="space-y-1 p-2">
@@ -497,20 +487,13 @@ export function AIChatPage() {
                         setIsDraftMode(false)
                       }}
                       className={cn(
-                        "flex w-full items-center rounded-lg transition-colors px-3 py-2.5 text-left",
+                        "flex w-full items-center gap-2 rounded-lg transition-colors px-3 py-2.5 text-left",
                         selectedChat === chat.id && !isDraftMode
                           ? "bg-accent"
                           : "hover:bg-secondary"
                       )}
                     >
-                      <div className="flex-1 overflow-hidden">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="truncate text-sm font-medium text-foreground">{chat.title}</p>
-                          <span className="shrink-0 text-xs text-muted-foreground">
-                            {formatTimestamp(chat.updated_at)}
-                          </span>
-                        </div>
-                      </div>
+                      <p className="flex-1 truncate text-sm font-medium text-foreground">{chat.title}</p>
                     </button>
                   ))}
                 </div>
@@ -536,8 +519,8 @@ export function AIChatPage() {
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary rounded-lg pointer-events-none">
             <div className="text-center">
               <Paperclip className="h-12 w-12 mx-auto mb-3 text-primary" />
-              <p className="text-lg font-semibold text-primary">Thả file vào đây</p>
-              <p className="text-sm text-muted-foreground">PDF, DOCX, TXT</p>
+              <p className="text-lg font-semibold text-primary">{t("aiChat.dropFilesHere")}</p>
+              <p className="text-sm text-muted-foreground">{t("aiChat.pdfDocxTxt")}</p>
             </div>
           </div>
         )}
@@ -550,9 +533,9 @@ export function AIChatPage() {
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="h-8 w-8 hidden md:flex"
+                  className={cn("h-8 w-8", historyCollapsed ? "flex" : "hidden md:flex")}
                   onClick={() => setHistoryCollapsed(!historyCollapsed)}
-                  title={historyCollapsed ? "Show chat history" : "Hide chat history"}
+                  title={historyCollapsed ? t("aiChat.showHistory") : t("aiChat.hideHistory")}
                 >
                   {historyCollapsed ? (
                     <PanelLeft className="h-4 w-4" />
@@ -568,16 +551,16 @@ export function AIChatPage() {
                 >
                   <ArrowLeft className="h-4 w-4" />
                 </Button>
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-                  <Bot className="h-4 w-4 text-primary" />
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 overflow-hidden">
+                  <img src="/logo.png" alt="AI" className="h-6 w-6 object-contain" />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-foreground">
                     {isDraftMode
-                      ? "New Chat"
+                      ? t("aiChat.newChat")
                       : sessions.find((c) => c.id === selectedChat)?.title}
                   </p>
-                  <p className="text-xs text-muted-foreground">AI Tutor</p>
+                  <p className="text-xs text-muted-foreground">{t("aiChat.aiTutor")}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -594,7 +577,7 @@ export function AIChatPage() {
                         onClick={() => handleDeleteSession(selectedChat!)}
                       >
                         <Trash2 className="mr-2 h-4 w-4" />
-                        Delete Chat
+                        {t("aiChat.deleteChat")}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -617,12 +600,12 @@ export function AIChatPage() {
                       className="h-16 w-16 object-contain mb-4"
                     />
                     <h3 className="text-lg font-semibold text-foreground mb-2">
-                      {isDraftMode ? "Bắt đầu cuộc trò chuyện mới" : "No messages yet"}
+                      {isDraftMode ? t("aiChat.startNewConversation") : t("aiChat.noMessages")}
                     </h3>
                     <p className="text-sm text-muted-foreground">
                       {isDraftMode
-                        ? "Gửi tin nhắn để bắt đầu. Hệ thống sẽ tự động tạo tiêu đề cho bạn."
-                        : "Start the conversation!"}
+                        ? t("aiChat.sendMessageToStart")
+                        : t("aiChat.startConversation")}
                     </p>
                   </div>
                 ) : (
@@ -635,11 +618,9 @@ export function AIChatPage() {
                       )}
                     >
                       {msg.role === "assistant" && (
-                        <Avatar className="h-8 w-8 shrink-0 border border-border">
-                          <AvatarFallback className="bg-primary/10 text-primary text-xs">
-                            <Bot className="h-4 w-4" />
-                          </AvatarFallback>
-                        </Avatar>
+                        <div className="h-8 w-8 shrink-0 rounded-full border border-border bg-primary/10 flex items-center justify-center overflow-hidden">
+                          <img src="/logo.png" alt="AI" className="h-6 w-6 object-contain" />
+                        </div>
                       )}
                       <div className={cn("flex flex-col gap-1", msg.role === "user" ? "items-end" : "items-start")}>
                         {/* Attached file chips – shown above the text bubble */}
@@ -680,14 +661,7 @@ export function AIChatPage() {
                               </div>
                             </div>
                           ) : (
-                            <>
-                              <MarkdownMessage content={msg.content} role={msg.role as "user" | "assistant"} />
-                              {!msg.isOptimistic && (
-                                <span className="mt-1 block text-xs opacity-70">
-                                  {formatTimestamp(msg.created_at)}
-                                </span>
-                              )}
-                            </>
+                            <MarkdownMessage content={msg.content} role={msg.role as "user" | "assistant"} />
                           )}
                         </div>
                       </div>
@@ -744,7 +718,7 @@ export function AIChatPage() {
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isSending || attachedFiles.length >= MAX_FILES}
-                    title={attachedFiles.length >= MAX_FILES ? `Đã đạt giới hạn ${MAX_FILES} file` : "chứ có thể đính kèm tối đa 3 file (PDF, DOCX, TXT)"}
+                    title={attachedFiles.length >= MAX_FILES ? t("aiChat.maxFilesReached", { n: MAX_FILES }) : t("aiChat.attachTooltip", { n: MAX_FILES })}
                     className="shrink-0 mb-0.5 flex h-7 w-7 items-center justify-center rounded-full bg-muted text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Plus className="h-4 w-4" />
@@ -753,7 +727,7 @@ export function AIChatPage() {
                   {/* Textarea */}
                   <Textarea
                     ref={textareaRef}
-                    placeholder="Ask me anything ..."
+                    placeholder={t("aiChat.askAnything")}
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                     onKeyDown={(e) => {
@@ -782,18 +756,29 @@ export function AIChatPage() {
                   </Button>
                 </div>
                 <p className="mt-1.5 text-center text-xs text-muted-foreground">
-                  Nhấn Enter để gửi · Shift+Enter xuống dòng · Đính kèm tối đa {MAX_FILES} file (PDF, DOCX, TXT ≤ {MAX_FILE_SIZE_MB} MB)
+                  {t("aiChat.enterToSend", { n: MAX_FILES, size: MAX_FILE_SIZE_MB })}
                 </p>
               </div>
             </div>
           </>
         ) : (
-          <div className="hidden md:flex flex-1 items-center justify-center">
+          <div className={cn("flex-1 items-center justify-center", historyCollapsed ? "flex" : "hidden md:flex")}>
             <div className="text-center">
+              {historyCollapsed && (
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="mx-auto mb-4 h-10 w-10"
+                  onClick={() => setHistoryCollapsed(false)}
+                  title={t("aiChat.openHistory")}
+                >
+                  <PanelLeft className="h-5 w-5" />
+                </Button>
+              )}
               <Bot className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-medium text-foreground mb-2">No Chat Selected</h3>
+              <h3 className="text-lg font-medium text-foreground mb-2">{t("aiChat.noChatSelected")}</h3>
               <p className="text-sm text-muted-foreground">
-                Select a chat or create a new one to start
+                {t("aiChat.selectOrCreate")}
               </p>
             </div>
           </div>

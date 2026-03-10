@@ -7,6 +7,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Loader2 } from "lucide-react"
 import { useAuth } from "@/hooks/use-auth"
 import { useApp } from "@/lib/app-context"
+import { useTranslation } from "@/lib/i18n"
 
 export function LoginPage() {
   const [isLogin, setIsLogin] = useState(true)
@@ -18,6 +19,7 @@ export function LoginPage() {
   
   const { login, register, loading, error } = useAuth()
   const { setUser, refreshUser } = useApp()
+  const { t } = useTranslation()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -59,12 +61,12 @@ export function LoginPage() {
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-bold text-center">
-            {isLogin ? "Welcome Back" : "Create Account"}
+            {isLogin ? t("auth.welcomeBack") : t("auth.createAccount")}
           </CardTitle>
           <CardDescription className="text-center">
             {isLogin
-              ? "Enter your credentials to access your account"
-              : "Sign up to get started with the platform"}
+              ? t("auth.loginDesc")
+              : t("auth.registerDesc")}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -76,11 +78,11 @@ export function LoginPage() {
 
           <form onSubmit={isLogin ? handleLogin : handleRegister} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t("auth.email")}</Label>
               <Input
                 id="email"
                 type="email"
-                placeholder="your.email@university.edu"
+                placeholder={t("auth.emailPlaceholder")}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -91,11 +93,11 @@ export function LoginPage() {
             {!isLogin && (
               <>
                 <div className="space-y-2">
-                  <Label htmlFor="username">Username</Label>
+                  <Label htmlFor="username">{t("auth.username")}</Label>
                   <Input
                     id="username"
                     type="text"
-                    placeholder="johndoe"
+                    placeholder={t("auth.usernamePlaceholder")}
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     required
@@ -103,22 +105,22 @@ export function LoginPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="fullName">Full Name (Optional)</Label>
+                  <Label htmlFor="fullName">{t("auth.fullNameOptional")}</Label>
                   <Input
                     id="fullName"
                     type="text"
-                    placeholder="John Doe"
+                    placeholder={t("auth.fullNamePlaceholder")}
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                     disabled={loading}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="studentId">Student ID (8 characters)</Label>
+                  <Label htmlFor="studentId">{t("auth.studentId")}</Label>
                   <Input
                     id="studentId"
                     type="text"
-                    placeholder="12345678"
+                    placeholder={t("auth.studentIdPlaceholder")}
                     value={studentId}
                     onChange={(e) => setStudentId(e.target.value)}
                     minLength={8}
@@ -127,14 +129,14 @@ export function LoginPage() {
                     disabled={loading}
                   />
                   {studentId && studentId.length !== 8 && (
-                    <p className="text-sm text-destructive">Student ID must be exactly 8 characters</p>
+                    <p className="text-sm text-destructive">{t("auth.studentIdError")}</p>
                   )}
                 </div>
               </>
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t("auth.password")}</Label>
               <Input
                 id="password"
                 type="password"
@@ -148,33 +150,33 @@ export function LoginPage() {
 
             <Button type="submit" className="w-full" disabled={loading}>
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {isLogin ? "Sign In" : "Sign Up"}
+              {isLogin ? t("auth.signIn") : t("auth.signUp")}
             </Button>
           </form>
 
           <div className="mt-4 text-center text-sm">
             {isLogin ? (
               <p className="text-muted-foreground">
-                Don't have an account?{" "}
+                {t("auth.noAccount")}{" "}
                 <button
                   type="button"
                   onClick={() => setIsLogin(false)}
                   className="text-primary hover:underline font-medium"
                   disabled={loading}
                 >
-                  Sign up
+                  {t("auth.signUpLink")}
                 </button>
               </p>
             ) : (
               <p className="text-muted-foreground">
-                Already have an account?{" "}
+                {t("auth.hasAccount")}{" "}
                 <button
                   type="button"
                   onClick={() => setIsLogin(true)}
                   className="text-primary hover:underline font-medium"
                   disabled={loading}
                 >
-                  Sign in
+                  {t("auth.signInLink")}
                 </button>
               </p>
             )}

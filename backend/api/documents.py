@@ -263,17 +263,71 @@ async def download_document(
         
         # Return as streaming response
         from io import BytesIO
+        from urllib.parse import quote
+        encoded_name = quote(document.file_name, safe='')
         return StreamingResponse(
             BytesIO(file_data),
             media_type=document.file_type,
             headers={
-                "Content-Disposition": f'attachment; filename="{document.file_name}"'
+                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"
             }
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Download failed: {str(e)}"
+        )
+
+
+# ============================================
+# Preview document file (inline – no force download)
+# ============================================
+@router.get("/{document_id}/preview")
+async def preview_document(
+    document_id: UUID,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db)
+):
+    """
+    Serve file inline (for browser preview, no Content-Disposition: attachment)
+    """
+    from fastapi.responses import StreamingResponse
+
+    document = db.query(Document).filter(
+        Document.id == document_id
+    ).first()
+
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found"
+        )
+
+    if document.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to access this document"
+        )
+
+    try:
+        object_name = document.file_path.split("/", 1)[1]
+        file_data = minio_service.download_file(object_name)
+
+        from io import BytesIO
+        from urllib.parse import quote
+        encoded_name = quote(document.file_name, safe='')
+        return StreamingResponse(
+            BytesIO(file_data),
+            media_type=document.file_type,
+            headers={
+                "Content-Disposition": f"inline; filename*=UTF-8''{encoded_name}",
+                "Cache-Control": "private, max-age=300",
+            }
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Preview failed: {str(e)}"
         )
 
 

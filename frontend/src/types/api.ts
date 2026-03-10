@@ -132,6 +132,7 @@ export interface Group {
   member_count: number
   created_at: string
   updated_at: string
+  member_avatars?: { avatar_url: string | null; full_name: string }[]
 }
 
 export interface GroupMember {

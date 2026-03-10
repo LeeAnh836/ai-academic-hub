@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { useTheme } from "next-themes"
 import { User, Mail, Lock, Moon, Sun, Bell, Globe, Eye, EyeOff, Save, Award as IdCard, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,11 +13,14 @@ import { useCurrentUser } from "@/hooks/use-auth"
 import { AvatarUpload } from "@/components/avatar-upload"
 import { userService } from "@/services/user.service"
 import { useToast } from "@/hooks/use-toast"
+import { useTranslation } from "@/lib/i18n"
 
 export function SettingsPage() {
   const { user, setUser } = useApp()
   const { updateUser } = useCurrentUser()
   const { toast } = useToast()
+  const { setTheme: applyTheme } = useTheme()
+  const { t, locale, setLocale } = useTranslation()
   
   // Profile state
   const [fullName, setFullName] = useState(user?.full_name || "")
@@ -31,7 +35,6 @@ export function SettingsPage() {
   
   // Settings state
   const [theme, setTheme] = useState<string>("light")
-  const [language, setLanguage] = useState<string>("en")
   const [notificationsEnabled, setNotificationsEnabled] = useState(true)
   const [emailNotifications, setEmailNotifications] = useState(true)
   const [isLoadingSettings, setIsLoadingSettings] = useState(true)
@@ -43,16 +46,11 @@ export function SettingsPage() {
       try {
         const settings = await userService.getUserSettings()
         setTheme(settings.theme)
-        setLanguage(settings.language)
         setNotificationsEnabled(settings.notifications_enabled)
         setEmailNotifications(settings.email_notifications)
         
-        // Apply theme
-        if (settings.theme === "dark") {
-          document.documentElement.classList.add("dark")
-        } else {
-          document.documentElement.classList.remove("dark")
-        }
+        // Apply theme via next-themes (persists to localStorage)
+        applyTheme(settings.theme)
       } catch (error) {
         console.error("Failed to load settings:", error)
       } finally {
@@ -68,8 +66,8 @@ export function SettingsPage() {
   const handleUpdateProfile = async () => {
     if (!fullName.trim()) {
       toast({
-        title: "Error",
-        description: "Full name cannot be empty",
+        title: t("common.error"),
+        description: t("settings.nameEmpty"),
         variant: "destructive",
       })
       return
@@ -79,13 +77,13 @@ export function SettingsPage() {
     try {
       await updateUser({ full_name: fullName })
       toast({
-        title: "Success",
-        description: "Profile updated successfully",
+        title: t("common.success"),
+        description: t("settings.profileUpdated"),
       })
     } catch (error: any) {
       toast({
-        title: "Error",
-        description: error.message || "Failed to update profile",
+        title: t("common.error"),
+        description: error.message || t("settings.failedProfile"),
         variant: "destructive",
       })
     } finally {
@@ -96,8 +94,8 @@ export function SettingsPage() {
   const handleChangePassword = async () => {
     if (!currentPassword || !newPassword || !confirmPassword) {
       toast({
-        title: "Error",
-        description: "Please fill in all password fields",
+        title: t("common.error"),
+        description: t("settings.fillPasswords"),
         variant: "destructive",
       })
       return
@@ -105,8 +103,8 @@ export function SettingsPage() {
 
     if (newPassword !== confirmPassword) {
       toast({
-        title: "Error",
-        description: "New passwords do not match",
+        title: t("common.error"),
+        description: t("settings.passwordsNoMatch"),
         variant: "destructive",
       })
       return
@@ -114,8 +112,8 @@ export function SettingsPage() {
 
     if (newPassword.length < 6) {
       toast({
-        title: "Error",
-        description: "New password must be at least 6 characters",
+        title: t("common.error"),
+        description: t("settings.passwordMinLength"),
         variant: "destructive",
       })
       return
@@ -129,8 +127,8 @@ export function SettingsPage() {
       })
       
       toast({
-        title: "Success",
-        description: "Password changed successfully",
+        title: t("common.success"),
+        description: t("settings.passwordChanged"),
       })
       
       // Clear fields
@@ -139,8 +137,8 @@ export function SettingsPage() {
       setConfirmPassword("")
     } catch (error: any) {
       toast({
-        title: "Error",
-        description: error.message || "Failed to change password",
+        title: t("common.error"),
+        description: error.message || t("settings.failedPassword"),
         variant: "destructive",
       })
     } finally {
@@ -151,13 +149,7 @@ export function SettingsPage() {
   const handleThemeChange = async (checked: boolean) => {
     const newTheme = checked ? "dark" : "light"
     setTheme(newTheme)
-    
-    // Apply immediately
-    if (checked) {
-      document.documentElement.classList.add("dark")
-    } else {
-      document.documentElement.classList.remove("dark")
-    }
+    applyTheme(newTheme) // persist via next-themes → localStorage
     
     // Save to backend
     try {
@@ -171,19 +163,19 @@ export function SettingsPage() {
     setIsSavingSettings(true)
     try {
       await userService.updateUserSettings({
-        language,
+        language: locale,
         notifications_enabled: notificationsEnabled,
         email_notifications: emailNotifications,
       })
       
       toast({
-        title: "Success",
-        description: "Preferences saved successfully",
+        title: t("common.success"),
+        description: t("settings.preferencesSuccess"),
       })
     } catch (error: any) {
       toast({
-        title: "Error",
-        description: error.message || "Failed to save preferences",
+        title: t("common.error"),
+        description: error.message || t("settings.failedPreferences"),
         variant: "destructive",
       })
     } finally {
@@ -201,15 +193,15 @@ export function SettingsPage() {
     <div className="mx-auto max-w-4xl space-y-6 p-4 md:p-6 lg:p-8">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Settings</h1>
-        <p className="text-sm text-muted-foreground">Manage your account preferences and security</p>
+        <h1 className="text-2xl font-bold text-foreground">{t("settings.title")}</h1>
+        <p className="text-sm text-muted-foreground">{t("settings.subtitle")}</p>
       </div>
 
       <Tabs defaultValue="profile" className="space-y-6">
         <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="profile">Profile</TabsTrigger>
-          <TabsTrigger value="security">Security</TabsTrigger>
-          <TabsTrigger value="preferences">Preferences</TabsTrigger>
+          <TabsTrigger value="profile">{t("settings.profile")}</TabsTrigger>
+          <TabsTrigger value="security">{t("settings.security")}</TabsTrigger>
+          <TabsTrigger value="preferences">{t("settings.preferences")}</TabsTrigger>
         </TabsList>
 
         {/* Profile Tab */}
@@ -217,8 +209,8 @@ export function SettingsPage() {
           {/* Avatar & Basic Info */}
           <Card>
             <CardHeader>
-              <CardTitle>Profile Information</CardTitle>
-              <CardDescription>Update your personal information and avatar</CardDescription>
+              <CardTitle>{t("settings.profileInfo")}</CardTitle>
+              <CardDescription>{t("settings.profileInfoDesc")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="flex items-center gap-6">
@@ -228,31 +220,31 @@ export function SettingsPage() {
                   onAvatarUpdated={handleAvatarUpdated}
                 />
                 <div>
-                  <h2 className="text-lg font-semibold text-foreground">{getUserDisplayName(user)}</h2>
+                  <h2 className="text-lg font-semibold text-foreground">{getUserDisplayName(user, t)}</h2>
                   <p className="text-sm text-muted-foreground">{user.email}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {getRoleLabel(user.role)} &middot; {formatStudentId(user.student_id)}
+                    {getRoleLabel(user.role, t)} &middot; {formatStudentId(user.student_id, t)}
                   </p>
                 </div>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <Label className="text-sm text-foreground">Full Name</Label>
+                  <Label className="text-sm text-foreground">{t("settings.fullName")}</Label>
                   <div className="relative mt-1">
                     <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input 
                       value={fullName} 
                       onChange={(e) => setFullName(e.target.value)}
                       className="bg-secondary pl-9" 
-                      placeholder="Enter your full name"
+                      placeholder={t("settings.fullNamePlaceholder")}
                     />
                   </div>
                 </div>
                 <div>
                   <Label className="text-sm text-foreground flex items-center gap-2">
-                    Email
-                    <span className="text-xs text-muted-foreground">(read-only)</span>
+                    {t("settings.email")}
+                    <span className="text-xs text-muted-foreground">{t("settings.readOnly")}</span>
                   </Label>
                   <div className="relative mt-1">
                     <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -263,12 +255,12 @@ export function SettingsPage() {
               
               <div>
                 <Label className="text-sm text-foreground flex items-center gap-2">
-                  Student ID
-                  <span className="text-xs text-muted-foreground">(read-only)</span>
+                  {t("settings.studentId")}
+                  <span className="text-xs text-muted-foreground">{t("settings.readOnly")}</span>
                 </Label>
                 <div className="relative mt-1">
                   <IdCard className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input value={formatStudentId(user.student_id)} className="bg-secondary/50 pl-9" readOnly />
+                  <Input value={formatStudentId(user.student_id, t)} className="bg-secondary/50 pl-9" readOnly />
                 </div>
               </div>
               
@@ -280,12 +272,12 @@ export function SettingsPage() {
                 {isUpdatingProfile ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Saving...
+                    {t("common.saving")}
                   </>
                 ) : (
                   <>
                     <Save className="h-4 w-4" />
-                    Save Changes
+                    {t("common.save")}
                   </>
                 )}
               </Button>
@@ -297,17 +289,17 @@ export function SettingsPage() {
         <TabsContent value="security" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Change Password</CardTitle>
-              <CardDescription>Update your password to keep your account secure</CardDescription>
+              <CardTitle>{t("settings.changePassword")}</CardTitle>
+              <CardDescription>{t("settings.changePasswordDesc")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <Label className="text-sm text-foreground">Current Password</Label>
+                <Label className="text-sm text-foreground">{t("settings.currentPassword")}</Label>
                 <div className="relative mt-1">
                   <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     type={showPassword ? "text" : "password"}
-                    placeholder="Enter current password"
+                    placeholder={t("settings.currentPasswordPlaceholder")}
                     value={currentPassword}
                     onChange={(e) => setCurrentPassword(e.target.value)}
                     className="bg-secondary pl-9 pr-9"
@@ -324,12 +316,12 @@ export function SettingsPage() {
               
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <Label className="text-sm text-foreground">New Password</Label>
+                  <Label className="text-sm text-foreground">{t("settings.newPassword")}</Label>
                   <div className="relative mt-1">
                     <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input 
                       type="password" 
-                      placeholder="New password (min 6 chars)" 
+                      placeholder={t("settings.newPasswordPlaceholder")} 
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       className="bg-secondary pl-9" 
@@ -337,12 +329,12 @@ export function SettingsPage() {
                   </div>
                 </div>
                 <div>
-                  <Label className="text-sm text-foreground">Confirm Password</Label>
+                  <Label className="text-sm text-foreground">{t("settings.confirmPassword")}</Label>
                   <div className="relative mt-1">
                     <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input 
                       type="password" 
-                      placeholder="Confirm password" 
+                      placeholder={t("settings.confirmPasswordPlaceholder")} 
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       className="bg-secondary pl-9" 
@@ -359,12 +351,12 @@ export function SettingsPage() {
                 {isChangingPassword ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Changing...
+                    {t("settings.changing")}
                   </>
                 ) : (
                   <>
                     <Lock className="h-4 w-4" />
-                    Update Password
+                    {t("settings.updatePassword")}
                   </>
                 )}
               </Button>
@@ -376,8 +368,8 @@ export function SettingsPage() {
         <TabsContent value="preferences" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Appearance & Notifications</CardTitle>
-              <CardDescription>Customize your experience</CardDescription>
+              <CardTitle>{t("settings.appearance")}</CardTitle>
+              <CardDescription>{t("settings.appearanceDesc")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               {isLoadingSettings ? (
@@ -394,8 +386,8 @@ export function SettingsPage() {
                         <Sun className="h-5 w-5 text-muted-foreground" />
                       )}
                       <div>
-                        <p className="text-sm font-medium text-foreground">Dark Mode</p>
-                        <p className="text-xs text-muted-foreground">Switch between light and dark theme</p>
+                        <p className="text-sm font-medium text-foreground">{t("settings.darkMode")}</p>
+                        <p className="text-xs text-muted-foreground">{t("settings.darkModeDesc")}</p>
                       </div>
                     </div>
                     <Switch 
@@ -410,17 +402,17 @@ export function SettingsPage() {
                     <div className="flex items-center gap-3">
                       <Globe className="h-5 w-5 text-muted-foreground" />
                       <div>
-                        <p className="text-sm font-medium text-foreground">Language</p>
-                        <p className="text-xs text-muted-foreground">Choose your preferred language</p>
+                        <p className="text-sm font-medium text-foreground">{t("settings.language")}</p>
+                        <p className="text-xs text-muted-foreground">{t("settings.languageDesc")}</p>
                       </div>
                     </div>
                     <select
-                      value={language}
-                      onChange={(e) => setLanguage(e.target.value)}
+                      value={locale}
+                      onChange={(e) => setLocale(e.target.value as "en" | "vi")}
                       className="rounded-md border border-input bg-secondary px-3 py-2 text-sm"
                     >
-                      <option value="en">English</option>
-                      <option value="vi">Tiếng Việt</option>
+                      <option value="en">{t("settings.english")}</option>
+                      <option value="vi">{t("settings.vietnamese")}</option>
                     </select>
                   </div>
 
@@ -430,8 +422,8 @@ export function SettingsPage() {
                     <div className="flex items-center gap-3">
                       <Bell className="h-5 w-5 text-muted-foreground" />
                       <div>
-                        <p className="text-sm font-medium text-foreground">Push Notifications</p>
-                        <p className="text-xs text-muted-foreground">Receive notifications in the app</p>
+                        <p className="text-sm font-medium text-foreground">{t("settings.pushNotifications")}</p>
+                        <p className="text-xs text-muted-foreground">{t("settings.pushNotificationsDesc")}</p>
                       </div>
                     </div>
                     <Switch 
@@ -444,8 +436,8 @@ export function SettingsPage() {
                     <div className="flex items-center gap-3">
                       <Mail className="h-5 w-5 text-muted-foreground" />
                       <div>
-                        <p className="text-sm font-medium text-foreground">Email Notifications</p>
-                        <p className="text-xs text-muted-foreground">Receive notifications via email</p>
+                        <p className="text-sm font-medium text-foreground">{t("settings.emailNotifications")}</p>
+                        <p className="text-xs text-muted-foreground">{t("settings.emailNotificationsDesc")}</p>
                       </div>
                     </div>
                     <Switch 
@@ -462,12 +454,12 @@ export function SettingsPage() {
                     {isSavingSettings ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Saving...
+                        {t("common.saving")}
                       </>
                     ) : (
                       <>
                         <Save className="h-4 w-4" />
-                        Save Preferences
+                        {t("settings.savePreferences")}
                       </>
                     )}
                   </Button>

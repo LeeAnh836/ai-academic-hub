@@ -41,13 +41,10 @@ export const userService = {
     formData.append('file', file)
     
     const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-    const token = localStorage.getItem('access_token')
     
     const response = await fetch(`${API_BASE_URL}/api/users/me/avatar`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
+      credentials: 'include',
       body: formData,
     })
 

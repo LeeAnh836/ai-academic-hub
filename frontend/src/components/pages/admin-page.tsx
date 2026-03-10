@@ -35,20 +35,22 @@ import {
   mockDocuments,
   mockActivityLogs,
 } from "@/lib/mock-data"
-
-const adminStats = [
-  { label: "Total Users", value: mockAdminStats.totalUsers.toLocaleString(), icon: Users, change: "+24 this week" },
-  { label: "Active Today", value: mockAdminStats.activeToday.toString(), icon: UserCheck, change: "27% of users" },
-  { label: "Total Groups", value: mockAdminStats.totalGroups.toString(), icon: FolderOpen, change: "+3 this week" },
-  { label: "AI Conversations", value: mockAdminStats.totalAIChats.toLocaleString(), icon: Bot, change: "+890 this week" },
-  { label: "Total Files", value: mockAdminStats.totalFiles.toLocaleString(), icon: FileText, change: "+156 this week" },
-  { label: "Storage Used", value: mockAdminStats.storageUsed, icon: HardDrive, change: "of 500 GB" },
-]
+import { useTranslation } from "@/lib/i18n"
 
 export function AdminPage() {
+  const { t } = useTranslation()
   const [userSearch, setUserSearch] = useState("")
   const [groupSearch, setGroupSearch] = useState("")
   const [fileSearch, setFileSearch] = useState("")
+
+  const adminStats = [
+    { label: t("admin.totalUsers"), value: mockAdminStats.totalUsers.toLocaleString(), icon: Users, change: "+24 this week" },
+    { label: t("admin.activeToday"), value: mockAdminStats.activeToday.toString(), icon: UserCheck, change: "27% of users" },
+    { label: t("admin.totalGroups"), value: mockAdminStats.totalGroups.toString(), icon: FolderOpen, change: "+3 this week" },
+    { label: t("admin.aiConversations"), value: mockAdminStats.totalAIChats.toLocaleString(), icon: Bot, change: "+890 this week" },
+    { label: t("admin.totalFiles"), value: mockAdminStats.totalFiles.toLocaleString(), icon: FileText, change: "+156 this week" },
+    { label: t("admin.storageUsed"), value: mockAdminStats.storageUsed, icon: HardDrive, change: "of 500 GB" },
+  ]
 
   const filteredUsers = mockUsers.filter(
     (u) =>
@@ -61,8 +63,8 @@ export function AdminPage() {
     <div className="space-y-6 p-4 md:p-6 lg:p-8">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Admin Panel</h1>
-        <p className="text-sm text-muted-foreground">System management and monitoring</p>
+        <h1 className="text-2xl font-bold text-foreground">{t("admin.title")}</h1>
+        <p className="text-sm text-muted-foreground">{t("admin.subtitle")}</p>
       </div>
 
       {/* Stats Grid */}
@@ -89,16 +91,16 @@ export function AdminPage() {
       <Tabs defaultValue="users" className="space-y-4">
         <TabsList className="bg-secondary">
           <TabsTrigger value="users" className="gap-2 data-[state=active]:bg-card data-[state=active]:text-foreground">
-            <Users className="h-4 w-4" /> Users
+            <Users className="h-4 w-4" /> {t("admin.users")}
           </TabsTrigger>
           <TabsTrigger value="groups" className="gap-2 data-[state=active]:bg-card data-[state=active]:text-foreground">
-            <FolderOpen className="h-4 w-4" /> Groups
+            <FolderOpen className="h-4 w-4" /> {t("admin.groups")}
           </TabsTrigger>
           <TabsTrigger value="files" className="gap-2 data-[state=active]:bg-card data-[state=active]:text-foreground">
-            <FileText className="h-4 w-4" /> Files
+            <FileText className="h-4 w-4" /> {t("admin.files")}
           </TabsTrigger>
           <TabsTrigger value="logs" className="gap-2 data-[state=active]:bg-card data-[state=active]:text-foreground">
-            <Activity className="h-4 w-4" /> Logs
+            <Activity className="h-4 w-4" /> {t("admin.logs")}
           </TabsTrigger>
         </TabsList>
 
@@ -108,7 +110,7 @@ export function AdminPage() {
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Search users by name, email, or ID..."
+                placeholder={t("admin.searchUsers")}
                 value={userSearch}
                 onChange={(e) => setUserSearch(e.target.value)}
                 className="h-9 bg-card pl-9 text-sm"
@@ -120,12 +122,12 @@ export function AdminPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    <th className="px-4 py-3 text-left">User</th>
-                    <th className="hidden px-4 py-3 text-left sm:table-cell">Student ID</th>
-                    <th className="hidden px-4 py-3 text-left md:table-cell">Email</th>
-                    <th className="px-4 py-3 text-left">Role</th>
-                    <th className="px-4 py-3 text-left">Status</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
+                    <th className="px-4 py-3 text-left">{t("admin.user")}</th>
+                    <th className="hidden px-4 py-3 text-left sm:table-cell">{t("admin.studentId")}</th>
+                    <th className="hidden px-4 py-3 text-left md:table-cell">{t("admin.email")}</th>
+                    <th className="px-4 py-3 text-left">{t("admin.role")}</th>
+                    <th className="px-4 py-3 text-left">{t("admin.status")}</th>
+                    <th className="px-4 py-3 text-right">{t("admin.actions")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -167,7 +169,7 @@ export function AdminPage() {
                             )}
                           />
                           <span className="text-xs text-muted-foreground">
-                            {user.online ? "Online" : user.lastSeen}
+                          {user.online ? t("common.online") : user.lastSeen}
                           </span>
                         </div>
                       </td>
@@ -180,14 +182,14 @@ export function AdminPage() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem>
-                              <Shield className="mr-2 h-4 w-4" /> Change Role
+                              <Shield className="mr-2 h-4 w-4" /> {t("admin.changeRole")}
                             </DropdownMenuItem>
                             <DropdownMenuItem>
-                              <Ban className="mr-2 h-4 w-4" /> Ban User
+                              <Ban className="mr-2 h-4 w-4" /> {t("admin.banUser")}
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem className="text-destructive">
-                              <Trash2 className="mr-2 h-4 w-4" /> Delete User
+                              <Trash2 className="mr-2 h-4 w-4" /> {t("admin.deleteUser")}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -205,7 +207,7 @@ export function AdminPage() {
           <div className="relative max-w-sm">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search groups..."
+              placeholder={t("admin.searchGroups")}
               value={groupSearch}
               onChange={(e) => setGroupSearch(e.target.value)}
               className="h-9 bg-card pl-9 text-sm"
@@ -216,11 +218,11 @@ export function AdminPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    <th className="px-4 py-3 text-left">Group</th>
-                    <th className="hidden px-4 py-3 text-left sm:table-cell">Members</th>
-                    <th className="hidden px-4 py-3 text-left md:table-cell">Files</th>
-                    <th className="px-4 py-3 text-left">Last Active</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
+                    <th className="px-4 py-3 text-left">{t("admin.group")}</th>
+                    <th className="hidden px-4 py-3 text-left sm:table-cell">{t("common.members")}</th>
+                    <th className="hidden px-4 py-3 text-left md:table-cell">{t("admin.files")}</th>
+                    <th className="px-4 py-3 text-left">{t("admin.lastActive")}</th>
+                    <th className="px-4 py-3 text-right">{t("admin.actions")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -254,10 +256,10 @@ export function AdminPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem>View Details</DropdownMenuItem>
+                            <DropdownMenuItem>{t("admin.viewDetails")}</DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem className="text-destructive">
-                              <Trash2 className="mr-2 h-4 w-4" /> Delete Group
+                              <Trash2 className="mr-2 h-4 w-4" /> {t("admin.deleteGroup")}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -275,7 +277,7 @@ export function AdminPage() {
           <div className="relative max-w-sm">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search files..."
+              placeholder={t("admin.searchFiles")}
               value={fileSearch}
               onChange={(e) => setFileSearch(e.target.value)}
               className="h-9 bg-card pl-9 text-sm"
@@ -286,11 +288,11 @@ export function AdminPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    <th className="px-4 py-3 text-left">File</th>
-                    <th className="hidden px-4 py-3 text-left sm:table-cell">Owner</th>
-                    <th className="hidden px-4 py-3 text-left md:table-cell">Size</th>
-                    <th className="px-4 py-3 text-left">Modified</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
+                    <th className="px-4 py-3 text-left">{t("admin.files")}</th>
+                    <th className="hidden px-4 py-3 text-left sm:table-cell">{t("admin.owner")}</th>
+                    <th className="hidden px-4 py-3 text-left md:table-cell">{t("docs.size")}</th>
+                    <th className="px-4 py-3 text-left">{t("docs.modified")}</th>
+                    <th className="px-4 py-3 text-right">{t("admin.actions")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -300,7 +302,7 @@ export function AdminPage() {
                         <div className="flex items-center gap-3">
                           <FileText className="h-4 w-4 text-muted-foreground" />
                           <span className="text-sm font-medium text-foreground">{doc.name}</span>
-                          {doc.shared && <Badge variant="secondary" className="text-xs">Shared</Badge>}
+                          {doc.shared && <Badge variant="secondary" className="text-xs">{t("common.shared")}</Badge>}
                         </div>
                       </td>
                       <td className="hidden px-4 py-3 text-sm text-muted-foreground sm:table-cell">
@@ -318,10 +320,10 @@ export function AdminPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem>Download</DropdownMenuItem>
+                            <DropdownMenuItem>{t("common.download")}</DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem className="text-destructive">
-                              <Trash2 className="mr-2 h-4 w-4" /> Delete
+                              <Trash2 className="mr-2 h-4 w-4" /> {t("common.delete")}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -338,7 +340,7 @@ export function AdminPage() {
         <TabsContent value="logs" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base text-foreground">Recent Activity</CardTitle>
+              <CardTitle className="text-base text-foreground">{t("admin.recentActivity")}</CardTitle>
             </CardHeader>
             <CardContent>
               <ScrollArea className="h-[400px]">

@@ -10,7 +10,6 @@ import {
   Trash2,
   File,
   FileSpreadsheet,
-  Presentation,
   Loader2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -42,6 +41,9 @@ import {
 import { Label } from "@/components/ui/label"
 import { useDocuments } from "@/hooks/use-documents"
 import { useToast } from "@/hooks/use-toast"
+import { FilePreviewModal } from "@/components/file-preview-modal"
+import type { Document } from "@/types/api"
+import { useTranslation } from "@/lib/i18n"
 
 function getFileIcon(type: string) {
   switch (type) {
@@ -49,10 +51,10 @@ function getFileIcon(type: string) {
       return <FileText className="h-5 w-5 text-red-500" />
     case "doc":
       return <File className="h-5 w-5 text-blue-500" />
-    case "xls":
+    case "csv":
       return <FileSpreadsheet className="h-5 w-5 text-emerald-500" />
-    case "ppt":
-      return <Presentation className="h-5 w-5 text-orange-500" />
+    case "txt":
+      return <FileText className="h-5 w-5 text-purple-500" />
     default:
       return <File className="h-5 w-5 text-muted-foreground" />
   }
@@ -64,13 +66,21 @@ function getFileColor(type: string) {
       return "bg-red-50 border-red-100"
     case "doc":
       return "bg-blue-50 border-blue-100"
-    case "xls":
+    case "csv":
       return "bg-emerald-50 border-emerald-100"
-    case "ppt":
-      return "bg-orange-50 border-orange-100"
+    case "txt":
+      return "bg-purple-50 border-purple-100"
     default:
       return "bg-secondary"
   }
+}
+
+function getFileTypeFromMime(mimeType: string) {
+  if (mimeType.includes('pdf')) return 'pdf'
+  if (mimeType.includes('word') || mimeType.includes('document')) return 'doc'
+  if (mimeType.includes('csv') || mimeType.includes('sheet') || mimeType.includes('excel')) return 'csv'
+  if (mimeType.includes('text/plain') || mimeType === 'text') return 'txt'
+  return 'file'
 }
 
 export function DocumentsPage() {
@@ -84,15 +94,17 @@ export function DocumentsPage() {
   const [title, setTitle] = useState("")
   const [category, setCategory] = useState("")
   const [tags, setTags] = useState("")
+  const [previewDoc, setPreviewDoc] = useState<Document | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   
   const { documents, loading, uploadDocument, deleteDocument } = useDocuments()
   const { toast } = useToast()
+  const { t } = useTranslation()
 
   const filteredDocs = documents.filter((doc) => {
     const matchesSearch = doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          doc.file_name.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesType = filterType === "all" || doc.category === filterType
+    const matchesType = filterType === "all" || getFileTypeFromMime(doc.file_type) === filterType
     return matchesSearch && matchesType
   })
 
@@ -107,8 +119,8 @@ export function DocumentsPage() {
   const handleUpload = async () => {
     if (!selectedFile) {
       toast({
-        title: "Error",
-        description: "Please select a file to upload",
+        title: t("common.error"),
+        description: t("docs.selectFile"),
         variant: "destructive",
       })
       return
@@ -124,8 +136,8 @@ export function DocumentsPage() {
       })
       
       toast({
-        title: "Success",
-        description: "Document uploaded successfully",
+        title: t("common.success"),
+        description: t("docs.uploadSuccess"),
       })
       
       setUploadDialogOpen(false)
@@ -135,8 +147,8 @@ export function DocumentsPage() {
       setTags("")
     } catch (error: any) {
       toast({
-        title: "Upload Failed",
-        description: error.message || "Failed to upload document",
+        title: t("docs.uploadFailed"),
+        description: error.message || t("docs.failedUpload"),
         variant: "destructive",
       })
     } finally {
@@ -148,12 +160,12 @@ export function DocumentsPage() {
     try {
       await deleteDocument(docId)
       toast({
-        title: "Success",
-        description: "Document deleted successfully",
+        title: t("common.success"),
+        description: t("docs.deleteSuccess"),
       })
     } catch (error: any) {
       toast({
-        title: "Delete Failed",
+        title: t("docs.deleteFailed"),
         description: error.message || "Failed to delete document",
         variant: "destructive",
       })
@@ -184,7 +196,7 @@ export function DocumentsPage() {
       document.body.removeChild(a)
     } catch (error: any) {
       toast({
-        title: "Download Failed",
+        title: t("docs.downloadFailed"),
         description: error.message || "Failed to download document",
         variant: "destructive",
       })
@@ -197,41 +209,33 @@ export function DocumentsPage() {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
   }
 
-  const getFileTypeFromMime = (mimeType: string) => {
-    if (mimeType.includes('pdf')) return 'pdf'
-    if (mimeType.includes('word') || mimeType.includes('document')) return 'doc'
-    if (mimeType.includes('sheet') || mimeType.includes('excel')) return 'xls'
-    if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return 'ppt'
-    return 'file'
-  }
-
   return (
     <div className="space-y-6 p-4 md:p-6 lg:p-8">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Documents</h1>
-          <p className="text-sm text-muted-foreground">Manage and share your study files</p>
+          <h1 className="text-2xl font-bold text-foreground">{t("docs.title")}</h1>
+          <p className="text-sm text-muted-foreground">{t("docs.subtitle")}</p>
         </div>
         <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
           <DialogTrigger asChild>
             <Button className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
               <Upload className="h-4 w-4" />
-              Upload File
+              {t("docs.uploadFile")}
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Upload Document</DialogTitle>
+              <DialogTitle>{t("docs.uploadDocument")}</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-4">
               <div>
-                <Label htmlFor="file">File</Label>
+                <Label htmlFor="file">{t("docs.file")}</Label>
                 <Input
                   ref={fileInputRef}
                   id="file"
                   type="file"
-                  accept=".pdf,.doc,.docx,.txt"
+                  accept=".pdf,.doc,.docx,.txt,.csv"
                   onChange={handleFileSelect}
                   className="mt-1"
                 />
@@ -242,32 +246,32 @@ export function DocumentsPage() {
                 )}
               </div>
               <div>
-                <Label htmlFor="title">Title (optional)</Label>
+                <Label htmlFor="title">{t("docs.titleOptional")}</Label>
                 <Input
                   id="title"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Document title"
+                  placeholder={t("docs.titlePlaceholder")}
                   className="mt-1"
                 />
               </div>
               <div>
-                <Label htmlFor="category">Category (optional)</Label>
+                <Label htmlFor="category">{t("docs.categoryOptional")}</Label>
                 <Input
                   id="category"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                  placeholder="e.g. homework, notes, project"
+                  placeholder={t("docs.categoryPlaceholder")}
                   className="mt-1"
                 />
               </div>
               <div>
-                <Label htmlFor="tags">Tags (optional, comma-separated)</Label>
+                <Label htmlFor="tags">{t("docs.tagsOptional")}</Label>
                 <Input
                   id="tags"
                   value={tags}
                   onChange={(e) => setTags(e.target.value)}
-                  placeholder="e.g. math, final, review"
+                  placeholder={t("docs.tagsPlaceholder")}
                   className="mt-1"
                 />
               </div>
@@ -278,7 +282,7 @@ export function DocumentsPage() {
                   className="flex-1"
                 >
                   {uploading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Upload
+                  {t("common.upload")}
                 </Button>
                 <Button
                   variant="outline"
@@ -291,7 +295,7 @@ export function DocumentsPage() {
                   }}
                   disabled={uploading}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
               </div>
             </div>
@@ -315,7 +319,7 @@ export function DocumentsPage() {
           <div className="flex items-center justify-center">
             <div className="text-center">
               <Upload className="mx-auto mb-2 h-8 w-8 text-primary" />
-              <p className="text-sm font-medium text-foreground">Drop files to upload</p>
+              <p className="text-sm font-medium text-foreground">{t("docs.dropToUpload")}</p>
             </div>
           </div>
         )}
@@ -327,7 +331,7 @@ export function DocumentsPage() {
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search documents..."
+              placeholder={t("docs.searchPlaceholder")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="h-9 bg-card pl-9 text-sm"
@@ -338,11 +342,11 @@ export function DocumentsPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Types</SelectItem>
-              <SelectItem value="pdf">PDF</SelectItem>
-              <SelectItem value="doc">Documents</SelectItem>
-              <SelectItem value="xls">Spreadsheets</SelectItem>
-              <SelectItem value="ppt">Presentations</SelectItem>
+              <SelectItem value="all">{t("docs.allTypes")}</SelectItem>
+              <SelectItem value="pdf">{t("docs.pdf")}</SelectItem>
+              <SelectItem value="doc">{t("docs.documents")}</SelectItem>
+              <SelectItem value="txt">{t("docs.txt")}</SelectItem>
+              <SelectItem value="csv">{t("docs.csvExcel")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -375,16 +379,21 @@ export function DocumentsPage() {
         <Card className="p-12">
           <div className="flex flex-col items-center justify-center text-center">
             <FileText className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-medium text-foreground mb-2">No documents yet</h3>
+            <h3 className="text-lg font-medium text-foreground mb-2">{t("docs.noDocuments")}</h3>
             <p className="text-sm text-muted-foreground mb-4">
-              Upload your first document to get started
+              {t("docs.uploadFirst")}
             </p>
           </div>
         </Card>
       ) : viewMode === "grid" ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filteredDocs.map((doc) => (
-            <Card key={doc.id} className="group cursor-pointer transition-all hover:shadow-md">
+            <Card
+              key={doc.id}
+              className="group cursor-pointer transition-all hover:shadow-md"
+              onDoubleClick={() => setPreviewDoc(doc)}
+              title={t("docs.dblClickPreview")}
+            >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between">
                   <div className={cn("flex h-12 w-12 items-center justify-center rounded-xl border", getFileColor(getFileTypeFromMime(doc.file_type)))}>
@@ -396,20 +405,21 @@ export function DocumentsPage() {
                         size="icon"
                         variant="ghost"
                         className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                        onClick={(e) => e.stopPropagation()}
                       >
                         <MoreVertical className="h-4 w-4" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => handleDownload(doc.id, doc.file_name)}>
-                        <Download className="mr-2 h-4 w-4" /> Download
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDownload(doc.id, doc.file_name) }}>
+                        <Download className="mr-2 h-4 w-4" /> {t("common.download")}
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem 
                         className="text-destructive"
-                        onClick={() => handleDelete(doc.id)}
+                        onClick={(e) => { e.stopPropagation(); handleDelete(doc.id) }}
                       >
-                        <Trash2 className="mr-2 h-4 w-4" /> Delete
+                        <Trash2 className="mr-2 h-4 w-4" /> {t("common.delete")}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -426,7 +436,7 @@ export function DocumentsPage() {
                   <span className="text-xs text-muted-foreground">{doc.category}</span>
                   {doc.is_processed && (
                     <Badge variant="secondary" className="text-xs">
-                      Processed
+                      {t("common.processed")}
                     </Badge>
                   )}
                 </div>
@@ -439,23 +449,25 @@ export function DocumentsPage() {
           <div className="divide-y divide-border">
             {/* Table header */}
             <div className="hidden items-center gap-4 px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider sm:flex">
-              <span className="flex-1">Name</span>
-              <span className="w-24 text-right">Size</span>
-              <span className="w-28">Modified</span>
-              <span className="w-24">Category</span>
+              <span className="flex-1">{t("docs.name")}</span>
+              <span className="w-24 text-right">{t("docs.size")}</span>
+              <span className="w-28">{t("docs.modified")}</span>
+              <span className="w-24">{t("docs.category")}</span>
               <span className="w-8" />
             </div>
             {filteredDocs.map((doc) => (
               <div
                 key={doc.id}
-                className="group flex items-center gap-4 px-4 py-3 transition-colors hover:bg-secondary"
+                className="group flex items-center gap-4 px-4 py-3 transition-colors hover:bg-secondary cursor-pointer"
+                onDoubleClick={() => setPreviewDoc(doc)}
+                title={t("docs.dblClickPreview")}
               >
                 <div className="flex flex-1 items-center gap-3 overflow-hidden">
                   {getFileIcon(getFileTypeFromMime(doc.file_type))}
                   <span className="truncate text-sm font-medium text-foreground">{doc.title}</span>
                   {doc.is_processed && (
                     <Badge variant="secondary" className="shrink-0 text-xs">
-                      Processed
+                      {t("common.processed")}
                     </Badge>
                   )}
                 </div>
@@ -472,20 +484,21 @@ export function DocumentsPage() {
                       size="icon"
                       variant="ghost"
                       className="h-7 w-7 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                      onClick={(e) => e.stopPropagation()}
                     >
                       <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => handleDownload(doc.id, doc.file_name)}>
-                      <Download className="mr-2 h-4 w-4" /> Download
+                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDownload(doc.id, doc.file_name) }}>
+                      <Download className="mr-2 h-4 w-4" /> {t("common.download")}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem 
                       className="text-destructive"
-                      onClick={() => handleDelete(doc.id)}
+                      onClick={(e) => { e.stopPropagation(); handleDelete(doc.id) }}
                     >
-                      <Trash2 className="mr-2 h-4 w-4" /> Delete
+                      <Trash2 className="mr-2 h-4 w-4" /> {t("common.delete")}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -494,6 +507,12 @@ export function DocumentsPage() {
           </div>
         </Card>
       )}
+
+      {/* File Preview Modal */}
+      <FilePreviewModal
+        doc={previewDoc}
+        onClose={() => setPreviewDoc(null)}
+      />
     </div>
   )
 }

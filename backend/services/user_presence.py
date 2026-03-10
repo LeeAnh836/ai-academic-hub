@@ -92,6 +92,7 @@ class UserPresenceManager:
     async def mark_user_offline(self, user_id: str) -> bool:
         """
         Xóa user khỏi online status (logout/disconnect)
+        Lưu thời gian last_seen riêng để hiện "X phút trước"
         
         Args:
             user_id: ID của user
@@ -103,7 +104,14 @@ class UserPresenceManager:
             raise RuntimeError("Redis client not connected")
         
         key = f"user:online:{user_id}"
+        last_seen_key = f"user:last_seen:{user_id}"
         try:
+            # Save last seen time (keep for 24h)
+            await self.redis_client.setex(
+                last_seen_key,
+                86400,
+                datetime.now(timezone.utc).isoformat()
+            )
             await self.redis_client.delete(key)
             return True
         except Exception as e:
@@ -113,19 +121,26 @@ class UserPresenceManager:
     async def get_user_last_activity(self, user_id: str) -> Optional[datetime]:
         """
         Lấy thông tin hoạt động cuối cùng của user
+        Kiểm tra cả online key và last_seen key
         
         Args:
             user_id: ID của user
         
         Returns:
-            DateTime của lần online cuối cùng, None nếu không online
+            DateTime của lần online cuối cùng, None nếu không tìm thấy
         """
         if not self.redis_client:
             raise RuntimeError("Redis client not connected")
         
-        key = f"user:online:{user_id}"
         try:
-            result = await self.redis_client.get(key)
+            # First check if user is still online (online key has their activity time)
+            online_key = f"user:online:{user_id}"
+            result = await self.redis_client.get(online_key)
+            if result:
+                return datetime.fromisoformat(result)
+            # Otherwise check last_seen key (set when they went offline)
+            last_seen_key = f"user:last_seen:{user_id}"
+            result = await self.redis_client.get(last_seen_key)
             if result:
                 return datetime.fromisoformat(result)
             return None

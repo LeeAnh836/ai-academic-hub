@@ -18,6 +18,8 @@ class Group(BaseModel):
     description = Column(Text, nullable=True)
     member_count = Column(Integer, default=0, nullable=False)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    last_message_at = Column(DateTime, default=datetime.utcnow, nullable=True)
+    last_message_content = Column(Text, nullable=True)
 
     # Relationships
     creator = relationship("User", foreign_keys=[created_by], back_populates="created_groups")
@@ -34,6 +36,7 @@ class GroupMember(BaseModel):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     role = Column(String(50), default="member", nullable=False)  # owner, admin, member
     joined_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_read_at = Column(DateTime, nullable=True)  # Track when user last read group messages
 
     # Relationships
     group = relationship("Group", back_populates="members")
@@ -47,12 +50,20 @@ class GroupMessage(BaseModel):
     group_id = Column(UUID(as_uuid=True), ForeignKey("groups.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     message_type = Column(String(50), default="text", nullable=False)  # text, file, image
-    content = Column(Text, nullable=False)
+    content = Column(Text, nullable=True)
+    file_url = Column(String(500), nullable=True)
+    file_name = Column(String(255), nullable=True)
+    file_size = Column(Integer, nullable=True)
     is_pinned = Column(Boolean, default=False, nullable=False)
+    reply_to_id = Column(UUID(as_uuid=True), ForeignKey("group_messages.id", ondelete="SET NULL"), nullable=True)
+    is_deleted = Column(Boolean, default=False, nullable=False)
 
     # Relationships
     group = relationship("Group", back_populates="messages")
     user = relationship("User", back_populates="group_messages")
+    reply_to = relationship("GroupMessage", remote_side="GroupMessage.id", foreign_keys=[reply_to_id], uselist=False)
+    reactions = relationship("MessageReaction", back_populates="group_message", cascade="all, delete-orphan",
+                             primaryjoin="GroupMessage.id == MessageReaction.group_message_id")
 
 
 class GroupFile(BaseModel):

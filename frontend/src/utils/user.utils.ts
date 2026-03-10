@@ -34,8 +34,8 @@ export function getUserInitials(user: User | null): string {
  * @param user - User object hoặc null
  * @returns Display name
  */
-export function getUserDisplayName(user: User | null): string {
-  if (!user) return "Unknown User"
+export function getUserDisplayName(user: User | null, t?: (key: string, params?: Record<string, string | number>) => string): string {
+  if (!user) return t ? t("common.unknownUser") : "Unknown User"
   return user.full_name || user.username || user.email
 }
 
@@ -44,7 +44,15 @@ export function getUserDisplayName(user: User | null): string {
  * @param role - User role
  * @returns Localized role label
  */
-export function getRoleLabel(role: string): string {
+export function getRoleLabel(role: string, t?: (key: string, params?: Record<string, string | number>) => string): string {
+  if (t) {
+    const roleKeys: Record<string, string> = {
+      admin: "common.admin",
+      user: "common.student",
+      moderator: "common.moderator",
+    }
+    return t(roleKeys[role] || "common.user")
+  }
   const roleLabels: Record<string, string> = {
     admin: "Admin",
     user: "Student",
@@ -67,7 +75,7 @@ export function isAdmin(user: User | null): boolean {
  * @param studentId - Student ID hoặc null
  * @returns Formatted student ID
  */
-export function formatStudentId(studentId: string | null): string {
-  if (!studentId) return "N/A"
+export function formatStudentId(studentId: string | null, t?: (key: string, params?: Record<string, string | number>) => string): string {
+  if (!studentId) return t ? t("common.notAvailable") : "N/A"
   return studentId
 }

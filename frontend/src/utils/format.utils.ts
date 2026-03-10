@@ -8,10 +8,19 @@
  * @param dateString - ISO date string hoặc Date object
  * @returns Relative time string
  */
-export function formatRelativeTime(dateString: string | Date): string {
+export function formatRelativeTime(dateString: string | Date, t?: (key: string, params?: Record<string, string | number>) => string): string {
   const date = typeof dateString === 'string' ? new Date(dateString) : dateString
   const now = new Date()
   const seconds = Math.floor((now.getTime() - date.getTime()) / 1000)
+
+  if (t) {
+    if (seconds < 60) return t("time.justNow")
+    if (seconds < 3600) return t("time.minutesAgo", { n: Math.floor(seconds / 60) })
+    if (seconds < 86400) return t("time.hoursAgo", { n: Math.floor(seconds / 3600) })
+    if (seconds < 2592000) return t("time.daysAgo", { n: Math.floor(seconds / 86400) })
+    if (seconds < 31536000) return t("time.monthsAgo", { n: Math.floor(seconds / 2592000) })
+    return t("time.yearsAgo", { n: Math.floor(seconds / 31536000) })
+  }
 
   if (seconds < 60) return "Just now"
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
@@ -26,9 +35,9 @@ export function formatRelativeTime(dateString: string | Date): string {
  * @param dateString - ISO date string
  * @returns Formatted date (Jan 15, 2024)
  */
-export function formatDate(dateString: string): string {
+export function formatDate(dateString: string, locale?: string): string {
   const date = new Date(dateString)
-  return date.toLocaleDateString("en-US", {
+  return date.toLocaleDateString(locale || "en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -40,9 +49,9 @@ export function formatDate(dateString: string): string {
  * @param dateString - ISO date string
  * @returns Formatted date and time
  */
-export function formatDateTime(dateString: string): string {
+export function formatDateTime(dateString: string, locale?: string): string {
   const date = new Date(dateString)
-  return date.toLocaleString("en-US", {
+  return date.toLocaleString(locale || "en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -71,8 +80,8 @@ export function formatFileSize(bytes: number): string {
  * @param num - Number to format
  * @returns Formatted number (1,234,567)
  */
-export function formatNumber(num: number): string {
-  return num.toLocaleString("en-US")
+export function formatNumber(num: number, locale?: string): string {
+  return num.toLocaleString(locale || "en-US")
 }
 
 /**

@@ -26,7 +26,7 @@ router = APIRouter(
 # ============================================
 # List groups
 # ============================================
-@router.get("", response_model=List[GroupResponse])
+@router.get("")
 async def list_groups(
     current_user: CurrentUser,
     db: Session = Depends(get_db),
@@ -34,14 +34,44 @@ async def list_groups(
     limit: int = 10
 ):
     """
-    Lấy danh sách groups của user
+    Lấy danh sách groups của user, kèm avatar 2 member mới nhất
     """
     # Lấy groups mà user đã join
     member_groups = db.query(Group).join(GroupMember).filter(
         GroupMember.user_id == current_user.id
     ).offset(skip).limit(limit).all()
     
-    return member_groups
+    result = []
+    for group in member_groups:
+        # Get last 2 members for avatar display
+        recent_members = db.query(GroupMember).filter(
+            GroupMember.group_id == group.id
+        ).order_by(GroupMember.joined_at.desc()).limit(2).all()
+        
+        member_avatars = []
+        for m in recent_members:
+            u = db.query(User).filter(User.id == m.user_id).first()
+            if u:
+                member_avatars.append({
+                    "avatar_url": u.avatar_url,
+                    "full_name": u.full_name or u.username,
+                })
+        
+        result.append({
+            "id": str(group.id),
+            "group_name": group.group_name,
+            "group_type": group.group_type,
+            "is_public": group.is_public,
+            "join_code": group.join_code,
+            "description": group.description,
+            "member_count": group.member_count,
+            "created_by": str(group.created_by) if group.created_by else None,
+            "created_at": group.created_at.isoformat() if group.created_at else None,
+            "updated_at": group.updated_at.isoformat() if group.updated_at else None,
+            "member_avatars": member_avatars,
+        })
+    
+    return result
 
 
 # ============================================
@@ -197,10 +227,10 @@ async def add_group_member(
         GroupMember.user_id == current_user.id
     ).first()
     
-    if not member or member.role not in ["owner", "admin"]:
+    if not member:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to add members to this group"
+            detail="You must be a member of this group to add members"
         )
     
     # Kiểm tra user được thêm tồn tại
@@ -239,6 +269,51 @@ async def add_group_member(
     db.commit()
     
     return {"message": "Member added successfully"}
+
+
+# ============================================
+# List group members
+# ============================================
+@router.get("/{group_id}/members")
+async def list_group_members(
+    group_id: UUID,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db)
+):
+    """
+    Lấy danh sách thành viên của group
+    """
+    group = db.query(Group).filter(Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
+
+    # Kiểm tra user là member
+    is_member = db.query(GroupMember).filter(
+        GroupMember.group_id == group_id,
+        GroupMember.user_id == current_user.id
+    ).first()
+    if not is_member and not group.is_public:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    members = db.query(GroupMember).filter(GroupMember.group_id == group_id).all()
+    result = []
+    for m in members:
+        user = db.query(User).filter(User.id == m.user_id).first()
+        result.append({
+            "id": str(m.id),
+            "group_id": str(m.group_id),
+            "user_id": str(m.user_id),
+            "role": m.role,
+            "joined_at": m.joined_at.isoformat() if m.joined_at else None,
+            "user": {
+                "id": str(user.id),
+                "username": user.username,
+                "full_name": user.full_name,
+                "avatar_url": user.avatar_url,
+                "student_id": user.student_id,
+            } if user else None,
+        })
+    return result
 
 
 # ============================================
@@ -322,3 +397,47 @@ async def delete_group(
     
     db.delete(group)
     db.commit()
+
+
+# ============================================
+# Leave group
+# ============================================
+@router.post("/{group_id}/leave")
+async def leave_group(
+    group_id: UUID,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db)
+):
+    """
+    Rời khỏi group
+    """
+    group = db.query(Group).filter(Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
+
+    member = db.query(GroupMember).filter(
+        GroupMember.group_id == group_id,
+        GroupMember.user_id == current_user.id
+    ).first()
+
+    if not member:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You are not a member of this group")
+
+    if group.created_by == current_user.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Group owner cannot leave. Delete the group instead.")
+
+    db.delete(member)
+    group.member_count = max(0, (group.member_count or 1) - 1)
+
+    # Add system message
+    system_msg = GroupMessage(
+        group_id=group_id,
+        user_id=current_user.id,
+        message_type="system",
+        content=f"{current_user.full_name or current_user.username} đã rời khỏi nhóm",
+    )
+    db.add(system_msg)
+
+    db.commit()
+
+    return {"message": "Left group successfully"}

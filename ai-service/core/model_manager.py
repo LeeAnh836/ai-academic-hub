@@ -21,6 +21,7 @@ class ModelManager:
         """Initialize provider clients."""
         self.gemini_api_key = None
         self.groq_client = None
+        self._groq_rate_limited = False  # Set True when Groq 429 TPD hit; resets on restart
         
         # Google Gemini (REST API)
         if settings.GOOGLE_API_KEY:
@@ -60,21 +61,26 @@ class ModelManager:
             return ("gemini-flash", settings.GEMINI_FLASH_MODEL)
         
         # Respect PRIMARY_PROVIDER setting
-        print(f"🔧 PRIMARY_PROVIDER={settings.PRIMARY_PROVIDER}, complexity={complexity}")
-        if settings.PRIMARY_PROVIDER == "groq" and self.groq_client:
-            # Groq as primary: Use for most tasks
-            print(f"✅ Using PRIMARY: Groq Llama (unlimited)")
-            return ("groq-llama", settings.GROQ_LLAMA_MODEL)
+        print(f"\U0001f527 PRIMARY_PROVIDER={settings.PRIMARY_PROVIDER}, task={task_type}, complexity={complexity}")
         
-        # Gemini as primary (default): Smart selection
+        # Smart selection based on task + complexity (regardless of PRIMARY_PROVIDER)
+        # Groq for simple/moderate, Gemini for complex — best use of both quotas
         model_key = self._select_model_key(task_type, complexity)
         
         if model_key == "gemini_flash" and self.gemini_api_key:
+            print(f"✅ Selected: Gemini Flash ({task_type} / {complexity})")
             return ("gemini-flash", settings.GEMINI_FLASH_MODEL)
         elif model_key == "gemini_pro" and self.gemini_api_key:
+            print(f"✅ Selected: Gemini Pro ({task_type} / {complexity})")
             return ("gemini-pro", settings.GEMINI_PRO_MODEL)
-        elif model_key == "groq" and self.groq_client:
-            return ("groq-llama", settings.GROQ_LLAMA_MODEL)
+        elif model_key == "groq":
+            if self.groq_client and not self._groq_rate_limited:
+                print(f"✅ Selected: Groq Llama ({task_type} / {complexity})")
+                return ("groq-llama", settings.GROQ_LLAMA_MODEL)
+            # Groq unavailable or rate-limited → upgrade to Gemini Flash
+            logger.warning(f"⚠️ Groq unavailable/rate-limited → upgrading to Gemini Flash")
+            if self.gemini_api_key:
+                return ("gemini-flash", settings.GEMINI_FLASH_MODEL)
         
         # Ultimate Fallback based on FALLBACK_PROVIDER
         if settings.FALLBACK_PROVIDER == "groq" and self.groq_client:
@@ -95,28 +101,26 @@ class ModelManager:
         raise ValueError("No LLM available!")
     
     def _select_model_key(self, task_type: str, complexity: str) -> str:
-        """Select best model based on task and complexity."""
-        # Complex tasks always use Pro for accuracy
+        """
+        Phân phối model theo độ phức tạp:
+          simple/low     → Groq  (nhanh, tiết kiệm Gemini quota)
+          moderate/medium → Groq  (đủ chất lượng cho phần lớn câu hỏi)
+          complex/high   → Gemini Flash (cần chất lượng cao, tổng hợp nhiều thông tin)
+        
+        complexity có thể là "simple"/"moderate"/"complex" (từ analyzer)
+        hoặc "low"/"medium"/"high" (từ các agent sau khi map)
+        """
+        # Tổng hợp / phân tích toàn bộ → Gemini Flash bất kể complexity
         if task_type in ["summarization", "question_generation", "homework_solver"]:
-            return "gemini_pro"
+            return "gemini_flash"
         
-        # RAG queries: Pro for high complexity
-        if task_type == "rag_query" and complexity in ["high", "medium"]:
-            return "gemini_pro"
-        
-        # Direct chat: Smart selection based on complexity
-        if task_type == "direct_chat":
-            if complexity == "low":
-                return "gemini_flash"  # Fast for simple queries
-            elif complexity in ["medium", "high"]:
-                return "gemini_pro"  # Accurate for complex knowledge
-        
-        # Code help: Pro for better accuracy
-        if task_type == "code_help":
-            return "gemini_pro"
-        
-        # Default: Flash for speed
-        return "gemini_flash"
+        # Phân phối theo complexity (chấp nhận cả 2 naming convention)
+        if complexity in ("simple", "low"):
+            return "groq"           # Groq: nhanh + miễn phí
+        elif complexity in ("moderate", "medium"):
+            return "groq"           # Groq vẫn đủ chất lượng
+        else:  # complex / high
+            return "gemini_flash"   # Gemini Flash: hiểu sâu, tổng hợp tốt
     
     def generate_text(
         self, 
@@ -163,18 +167,51 @@ class ModelManager:
             error_str = str(e)
             logger.error(f"❌ Generation failed ({provider_name}): {e}")
             
+            # If Groq itself is the primary and hits 429, flag it and try Gemini fallback
+            if "groq" in provider_name and ("429" in error_str or "rate_limit_exceeded" in error_str):
+                self._groq_rate_limited = True
+                logger.error("❌ Groq TPD 429 while using Groq as primary — flagging as exhausted")
+                if self.gemini_api_key:
+                    logger.warning("⚠️ Groq 429 → Retrying with Gemini Flash")
+                    try:
+                        return self._generate_gemini(
+                            settings.GEMINI_FLASH_MODEL, prompt, system_instruction,
+                            temperature, max_tokens
+                        )
+                    except Exception as gem_err:
+                        raise Exception(f"Groq hết quota ngày hôm nay và Gemini cũng lỗi: {gem_err}")
+                raise Exception(
+                    "Groq đã hết quota hôm nay (100k tokens/ngày). "
+                    "Vui lòng đổi PRIMARY_PROVIDER=gemini trong .env và restart service."
+                )
+            
             # Automatic fallback to Groq if enabled and available
+            # BUT: don't fall back to Groq if Groq itself is rate-limited (429)
             if enable_fallback and "gemini" in provider_name and self.groq_client:
+                # Check if Groq is already known to be rate-limited
+                if getattr(self, '_groq_rate_limited', False):
+                    logger.warning("⚠️ Skipping Groq fallback — Groq daily limit (TPD) exhausted")
+                    raise Exception(f"Gemini failed và Groq đã hết quota ngày hôm nay. Vui lòng thử lại vào ngày mai.")
                 logger.warning(f"⚠️ Fallback: Gemini failed → Switching to Groq Llama")
                 try:
+                    # Use smaller token budget on Groq to preserve daily quota (100k TPD)
+                    groq_max_tokens = min(max_tokens, 2048)
                     return self._generate_groq(
                         settings.GROQ_LLAMA_MODEL,
                         prompt,
                         system_instruction,
                         temperature,
-                        max_tokens
+                        groq_max_tokens
                     )
                 except Exception as fallback_error:
+                    fallback_str = str(fallback_error)
+                    if "429" in fallback_str or "rate_limit_exceeded" in fallback_str:
+                        self._groq_rate_limited = True
+                        logger.error("❌ Groq 429: daily TPD limit reached")
+                        raise Exception(
+                            "Groq đã hết quota hôm nay (100k tokens/ngày). "
+                            "Hệ thống đang chỉ dùng Gemini. Nếu Gemini cũng lỗi, vui lòng thử lại sau."
+                        )
                     logger.error(f"❌ Fallback also failed: {fallback_error}")
                     raise Exception(f"Primary and fallback failed. Primary: {error_str}, Fallback: {fallback_error}")
             
@@ -191,7 +228,8 @@ class ModelManager:
         """Generate text using Gemini REST API."""
         full_prompt = f"{system_instruction}\n\n{prompt}" if system_instruction else prompt
         
-        url = f"https://generativelanguage.googleapis.com/v1/models/{model_identifier}:generateContent?key={self.gemini_api_key}"
+        # v1beta supports all models including gemini-2.5; v1 does not support 2.5 yet
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_identifier}:generateContent?key={self.gemini_api_key}"
         
         payload = {
             "contents": [{

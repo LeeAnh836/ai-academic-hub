@@ -19,6 +19,7 @@ import { formatRelativeTime } from "@/utils/format.utils"
 import { useChatSessions } from "@/hooks/use-chat"
 import { useDocuments } from "@/hooks/use-documents"
 import { useGroups } from "@/hooks/use-groups"
+import { useTranslation } from "@/lib/i18n"
 
 export function DashboardPage() {
   const { user } = useApp()
@@ -26,14 +27,15 @@ export function DashboardPage() {
   const { sessions, loading: sessionsLoading } = useChatSessions(true)
   const { documents, loading: documentsLoading } = useDocuments(true)
   const { groups, loading: groupsLoading } = useGroups(true)
+  const { t } = useTranslation()
   
   if (!user) return null
   
   const stats = [
-    { label: "Documents", value: documents.length.toString(), icon: FileText, change: "+3 this week" },
-    { label: "AI Chats", value: sessions.length.toString(), icon: Bot, change: "+5 this week" },
-    { label: "Study Groups", value: groups.length.toString(), icon: Users, change: "+1 this week" },
-    { label: "Study Time", value: "32h", icon: Clock, change: "+4h this week" },
+    { label: t("dashboard.documents"), value: documents.length.toString(), icon: FileText, change: t("dashboard.thisWeek", { n: 3 }) },
+    { label: t("dashboard.aiChats"), value: sessions.length.toString(), icon: Bot, change: t("dashboard.thisWeek", { n: 5 }) },
+    { label: t("dashboard.studyGroups"), value: groups.length.toString(), icon: Users, change: t("dashboard.thisWeek", { n: 1 }) },
+    { label: t("dashboard.studyTime"), value: "32h", icon: Clock, change: t("dashboard.thisWeek", { n: 4 }) },
   ]
 
   return (
@@ -41,10 +43,10 @@ export function DashboardPage() {
       {/* Welcome */}
       <div>
         <h1 className="text-2xl font-bold text-foreground">
-          Welcome back, {getUserDisplayName(user).split(" ")[0]}
+          {t("dashboard.welcomeBack", { name: getUserDisplayName(user, t).split(" ")[0] })}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Here is what is happening with your studies today.
+          {t("dashboard.subtitle")}
         </p>
       </div>
 
@@ -72,15 +74,15 @@ export function DashboardPage() {
       <div className="flex flex-wrap gap-3">
         <Button onClick={() => navigate("/ai-chat")} className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
           <Plus className="h-4 w-4" />
-          New AI Chat
+          {t("dashboard.newAiChat")}
         </Button>
         <Button variant="outline" onClick={() => navigate("/documents")} className="gap-2">
           <Upload className="h-4 w-4" />
-          Upload File
+          {t("dashboard.uploadFile")}
         </Button>
         <Button variant="outline" onClick={() => navigate("/groups")} className="gap-2">
           <UserPlus className="h-4 w-4" />
-          Create Group
+          {t("dashboard.createGroup")}
         </Button>
       </div>
 
@@ -89,21 +91,21 @@ export function DashboardPage() {
         {/* Recent AI Chats */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <CardTitle className="text-base font-semibold text-foreground">Recent AI Chats</CardTitle>
+            <CardTitle className="text-base font-semibold text-foreground">{t("dashboard.recentAiChats")}</CardTitle>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => navigate("/ai-chat")}
               className="gap-1 text-xs text-muted-foreground"
             >
-              View all <ArrowUpRight className="h-3 w-3" />
+              {t("dashboard.viewAll")} <ArrowUpRight className="h-3 w-3" />
             </Button>
           </CardHeader>
           <CardContent className="space-y-3">
             {sessionsLoading ? (
-              <p className="text-sm text-muted-foreground text-center py-4">Loading...</p>
+              <p className="text-sm text-muted-foreground text-center py-4">{t("common.loading")}</p>
             ) : sessions.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">No chats yet. Start your first AI conversation!</p>
+              <p className="text-sm text-muted-foreground text-center py-4">{t("dashboard.noChats")}</p>
             ) : (
               sessions.slice(0, 4).map((chat) => (
                 <button
@@ -117,7 +119,7 @@ export function DashboardPage() {
                   <div className="flex-1 overflow-hidden">
                     <p className="truncate text-sm font-medium text-foreground">{chat.title}</p>
                     <p className="truncate text-xs text-muted-foreground">
-                      {chat.message_count} messages • {formatRelativeTime(chat.updated_at)}
+                      {chat.message_count} {t("common.messages")} • {formatRelativeTime(chat.updated_at, t)}
                     </p>
                   </div>
                   <Badge variant="secondary" className="shrink-0 text-[10px]">
@@ -132,21 +134,21 @@ export function DashboardPage() {
         {/* Recent Documents */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <CardTitle className="text-base font-semibold text-foreground">Recent Documents</CardTitle>
+            <CardTitle className="text-base font-semibold text-foreground">{t("dashboard.recentDocuments")}</CardTitle>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => navigate("/documents")}
               className="gap-1 text-xs text-muted-foreground"
             >
-              View all <ArrowUpRight className="h-3 w-3" />
+              {t("dashboard.viewAll")} <ArrowUpRight className="h-3 w-3" />
             </Button>
           </CardHeader>
           <CardContent className="space-y-3">
             {documentsLoading ? (
-              <p className="text-sm text-muted-foreground text-center py-4">Loading...</p>
+              <p className="text-sm text-muted-foreground text-center py-4">{t("common.loading")}</p>
             ) : documents.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">No documents yet. Upload your first file!</p>
+              <p className="text-sm text-muted-foreground text-center py-4">{t("dashboard.noDocs")}</p>
             ) : (
               documents.slice(0, 4).map((doc) => (
                 <div
@@ -159,7 +161,7 @@ export function DashboardPage() {
                   <div className="flex-1 overflow-hidden">
                     <p className="truncate text-sm font-medium text-foreground">{doc.title}</p>
                     <p className="text-xs text-muted-foreground">
-                      {doc.file_type} • {formatRelativeTime(doc.updated_at)}
+                      {doc.file_type} • {formatRelativeTime(doc.updated_at, t)}
                     </p>
                   </div>
                   <Badge variant="secondary" className="shrink-0 text-xs">
@@ -174,22 +176,22 @@ export function DashboardPage() {
         {/* Active Groups */}
         <Card className="lg:col-span-2">
           <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <CardTitle className="text-base font-semibold text-foreground">Active Groups</CardTitle>
+            <CardTitle className="text-base font-semibold text-foreground">{t("dashboard.activeGroups")}</CardTitle>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => navigate("/groups")}
               className="gap-1 text-xs text-muted-foreground"
             >
-              View all <ArrowUpRight className="h-3 w-3" />
+              {t("dashboard.viewAll")} <ArrowUpRight className="h-3 w-3" />
             </Button>
           </CardHeader>
           <CardContent>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {groupsLoading ? (
-                <p className="text-sm text-muted-foreground text-center py-4 col-span-full">Loading...</p>
+                <p className="text-sm text-muted-foreground text-center py-4 col-span-full">{t("common.loading")}</p>
               ) : groups.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4 col-span-full">No groups yet. Create or join a study group!</p>
+                <p className="text-sm text-muted-foreground text-center py-4 col-span-full">{t("dashboard.noGroups")}</p>
               ) : (
                 groups.slice(0, 3).map((group) => (
                   <div

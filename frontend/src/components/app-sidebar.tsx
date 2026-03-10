@@ -18,23 +18,25 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { getUserInitials, getUserDisplayName, getRoleLabel, isAdmin } from "@/utils/user.utils"
 import { useToast } from "@/hooks/use-toast"
+import { useTranslation } from "@/lib/i18n"
 
 const navItems = [
-  { id: "ai-chat" as const, label: "AI Chat", icon: Bot, path: "/ai-chat" },
-  { id: "dashboard" as const, label: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
-  { id: "messages" as const, label: "Messages", icon: MessageCircle, badge: 7, path: "/messages" },
-  { id: "documents" as const, label: "Documents", icon: FileText, path: "/documents" },
-  { id: "groups" as const, label: "Groups", icon: Users, path: "/groups" },
+  { id: "ai-chat" as const, tKey: "nav.aiChat", icon: Bot, path: "/ai-chat" },
+  { id: "dashboard" as const, tKey: "nav.dashboard", icon: LayoutDashboard, path: "/dashboard" },
+  { id: "messages" as const, tKey: "nav.messages", icon: MessageCircle, path: "/messages" },
+  { id: "documents" as const, tKey: "nav.documents", icon: FileText, path: "/documents" },
+  { id: "groups" as const, tKey: "nav.groups", icon: Users, path: "/groups" },
 ]
 
 const adminItems = [
-  { id: "admin" as const, label: "Admin Panel", icon: Shield, path: "/admin" },
+  { id: "admin" as const, tKey: "nav.adminPanel", icon: Shield, path: "/admin" },
 ]
 
 export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
-  const { user, setUser } = useApp()
+  const { user, setUser, unreadCount } = useApp()
   const { logout } = useAuth()
   const { toast } = useToast()
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
   
@@ -48,8 +50,8 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
       await logout()
       setUser(null)
       toast({
-        title: "Logout successful",
-        description: "You have been logged out of the system",
+        title: t("nav.logoutSuccess"),
+        description: t("nav.logoutDesc"),
       })
     } catch (error) {
       console.error("Logout error:", error)
@@ -100,17 +102,17 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
             <item.icon className="h-5 w-5 shrink-0" />
             {!collapsed && (
               <>
-                <span className="flex-1 text-left">{item.label}</span>
-                {item.badge && (
+                <span className="flex-1 text-left">{t(item.tKey)}</span>
+                {item.id === "messages" && unreadCount > 0 && (
                   <Badge variant="destructive" className="h-5 min-w-5 px-1.5 text-xs">
-                    {item.badge}
+                    {unreadCount > 99 ? "99+" : unreadCount}
                   </Badge>
                 )}
               </>
             )}
-            {collapsed && item.badge && (
+            {collapsed && item.id === "messages" && unreadCount > 0 && (
               <Badge variant="destructive" className="absolute right-2 h-4 min-w-4 px-1 text-[10px]">
-                {item.badge}
+                {unreadCount > 99 ? "99+" : unreadCount}
               </Badge>
             )}
           </button>
@@ -131,7 +133,7 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
                 )}
               >
                 <item.icon className="h-5 w-5 shrink-0" />
-                {!collapsed && <span className="flex-1 text-left">{item.label}</span>}
+                {!collapsed && <span className="flex-1 text-left">{t(item.tKey)}</span>}
               </button>
             ))}
           </>
@@ -163,7 +165,7 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
             {user.avatar_url && (
               <AvatarImage 
                 src={`${user.avatar_url}?t=${new Date(user.updated_at || Date.now()).getTime()}`} 
-                alt={getUserDisplayName(user)} 
+                alt={getUserDisplayName(user, t)} 
               />
             )}
             <AvatarFallback className="bg-primary text-primary-foreground text-xs">
@@ -173,10 +175,10 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
           {!collapsed && (
             <div className="flex-1 text-left">
               <p className="text-sm font-medium text-foreground">
-                {getUserDisplayName(user)}
+                {getUserDisplayName(user, t)}
               </p>
               <p className="text-xs text-muted-foreground">
-                {getRoleLabel(user.role)}
+                {getRoleLabel(user.role, t)}
               </p>
             </div>
           )}
@@ -191,7 +193,7 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
           )}
         >
           <LogOut className="h-5 w-5 shrink-0" />
-          {!collapsed && <span className="flex-1 text-left">Log Out</span>}
+          {!collapsed && <span className="flex-1 text-left">{t("nav.logout")}</span>}
         </button>
       </div>
     </aside>

@@ -13,7 +13,7 @@ from uuid import UUID
 class GroupCreateRequest(BaseModel):
     """Schema cho request tạo group"""
     group_name: str = Field(..., min_length=1, max_length=255)
-    group_type: str = Field(default="public", pattern="^(public|private)$")
+    group_type: str = Field(default="public", pattern="^(public|private|chat|study)$")
     description: Optional[str] = None
     is_public: bool = True
 
@@ -21,9 +21,9 @@ class GroupCreateRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "group_name": "Java Developers",
-                "group_type": "public",
+                "group_type": "chat",
                 "description": "A group for Java developers",
-                "is_public": True
+                "is_public": False
             }
         }
 

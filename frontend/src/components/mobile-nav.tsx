@@ -19,19 +19,21 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { getUserInitials, getUserDisplayName, getRoleLabel, isAdmin } from "@/utils/user.utils"
 import { useToast } from "@/hooks/use-toast"
 import { useState } from "react"
+import { useTranslation } from "@/lib/i18n"
 
 const bottomNavItems = [
-  { id: "ai-chat" as const, label: "AI Chat", icon: Bot, path: "/ai-chat" },
-  { id: "dashboard" as const, label: "Home", icon: LayoutDashboard, path: "/dashboard" },
-  { id: "messages" as const, label: "Messages", icon: MessageCircle, badge: 7, path: "/messages" },
-  { id: "documents" as const, label: "Files", icon: FileText, path: "/documents" },
-  { id: "groups" as const, label: "Groups", icon: Users, path: "/groups" },
+  { id: "ai-chat" as const, tKey: "nav.aiChat", icon: Bot, path: "/ai-chat" },
+  { id: "dashboard" as const, tKey: "nav.home", icon: LayoutDashboard, path: "/dashboard" },
+  { id: "messages" as const, tKey: "nav.messages", icon: MessageCircle, path: "/messages" },
+  { id: "documents" as const, tKey: "nav.files", icon: FileText, path: "/documents" },
+  { id: "groups" as const, tKey: "nav.groups", icon: Users, path: "/groups" },
 ]
 
 export function MobileHeader() {
   const { user, setUser } = useApp()
   const { logout } = useAuth()
   const { toast } = useToast()
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
@@ -45,8 +47,8 @@ export function MobileHeader() {
       setUser(null)
       setOpen(false)
       toast({
-        title: "Đăng xuất thành công",
-        description: "Bạn đã đăng xuất khỏi hệ thống",
+        title: t("nav.logoutSuccess"),
+        description: t("nav.logoutDesc"),
       })
     } catch (error) {
       console.error("Logout error:", error)
@@ -56,14 +58,14 @@ export function MobileHeader() {
     }
   }
 
-  const pageTitle: Record<string, string> = {
-    "/dashboard": "Dashboard",
-    "/ai-chat": "AI Chat",
-    "/messages": "Messages",
-    "/documents": "Documents",
-    "/groups": "Groups",
-    "/admin": "Admin Panel",
-    "/settings": "Settings",
+  const pageTitleKeys: Record<string, string> = {
+    "/dashboard": "nav.dashboard",
+    "/ai-chat": "nav.aiChat",
+    "/messages": "nav.messages",
+    "/documents": "nav.documents",
+    "/groups": "nav.groups",
+    "/admin": "nav.adminPanel",
+    "/settings": "nav.settings",
   }
 
   return (
@@ -72,7 +74,7 @@ export function MobileHeader() {
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
           <GraduationCap className="h-4 w-4" />
         </div>
-        <span className="font-semibold text-foreground">{pageTitle[location.pathname] || "Dashboard"}</span>
+        <span className="font-semibold text-foreground">{t(pageTitleKeys[location.pathname] || "nav.dashboard")}</span>
       </div>
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
@@ -87,7 +89,7 @@ export function MobileHeader() {
                 {user.avatar_url && (
                   <AvatarImage 
                     src={`${user.avatar_url}?t=${new Date(user.updated_at || Date.now()).getTime()}`} 
-                    alt={getUserDisplayName(user)} 
+                    alt={getUserDisplayName(user, t)} 
                   />
                 )}
                 <AvatarFallback className="bg-primary text-primary-foreground text-sm">
@@ -95,8 +97,8 @@ export function MobileHeader() {
                 </AvatarFallback>
               </Avatar>
               <div>
-                <p className="text-sm font-medium text-foreground">{getUserDisplayName(user)}</p>
-                <p className="text-xs text-muted-foreground">{getRoleLabel(user.role)}</p>
+                <p className="text-sm font-medium text-foreground">{getUserDisplayName(user, t)}</p>
+                <p className="text-xs text-muted-foreground">{getRoleLabel(user.role, t)}</p>
               </div>
             </div>
             <nav className="flex-1 p-3 space-y-1">
@@ -111,7 +113,7 @@ export function MobileHeader() {
                   )}
                 >
                   <Shield className="h-5 w-5" />
-                  Admin Panel
+                  {t("nav.adminPanel")}
                 </button>
               )}
               <button
@@ -124,7 +126,7 @@ export function MobileHeader() {
                 )}
               >
                 <User className="h-5 w-5" />
-                Settings
+                {t("nav.settings")}
               </button>
             </nav>
             {/* Logout Button */}
@@ -134,7 +136,7 @@ export function MobileHeader() {
                 className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
               >
                 <LogOut className="h-5 w-5" />
-                Đăng xuất
+                {t("nav.logout")}
               </button>
             </div>
           </div>
@@ -147,6 +149,8 @@ export function MobileHeader() {
 export function MobileBottomNav() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { unreadCount } = useApp()
+  const { t } = useTranslation()
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 flex h-16 items-center justify-around border-t border-border bg-card md:hidden">
@@ -163,13 +167,13 @@ export function MobileBottomNav() {
         >
           <div className="relative">
             <item.icon className="h-5 w-5" />
-            {item.badge && (
+            {item.id === "messages" && unreadCount > 0 && (
               <span className="absolute -right-2 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium text-destructive-foreground">
-                {item.badge}
+                {unreadCount > 99 ? "99+" : unreadCount}
               </span>
             )}
           </div>
-          <span className="font-medium">{item.label}</span>
+          <span className="font-medium">{t(item.tKey)}</span>
         </button>
       ))}
     </nav>

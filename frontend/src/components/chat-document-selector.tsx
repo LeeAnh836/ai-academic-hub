@@ -13,6 +13,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { useDocuments } from "@/hooks/use-documents"
 import { documentService } from "@/services/document.service"
 import { useToast } from "@/hooks/use-toast"
+import { useTranslation } from "@/lib/i18n"
 import type { Document } from "@/types/api"
 import { cn } from "@/lib/utils"
 
@@ -34,6 +35,7 @@ export function ChatDocumentSelector({
   const [uploading, setUploading] = useState(false)
   const { documents, loading, refetch } = useDocuments(true)
   const { toast } = useToast()
+  const { t } = useTranslation()
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -55,8 +57,8 @@ export function ChatDocumentSelector({
       })
       
       toast({
-        title: "Success",
-        description: `Document uploaded: ${newDoc.title}`,
+        title: t("common.success"),
+        description: t("chatDoc.uploadedDoc", { title: newDoc.title }),
       })
       
       // Add to selected documents
@@ -70,8 +72,8 @@ export function ChatDocumentSelector({
       await refetch()
     } catch (error: any) {
       toast({
-        title: "Upload failed",
-        description: error.message || "Failed to upload document",
+        title: t("chatDoc.uploadFailed"),
+        description: error.message || t("chatDoc.uploadFailed"),
         variant: "destructive",
       })
     } finally {
@@ -101,13 +103,13 @@ export function ChatDocumentSelector({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>Attach Documents to Chat</DialogTitle>
+          <DialogTitle>{t("chatDoc.title")}</DialogTitle>
         </DialogHeader>
 
         <div className="flex-1 space-y-6 overflow-hidden flex flex-col">
           {/* Upload Section */}
           <div className="border-b pb-4">
-            <h3 className="text-sm font-medium mb-3">Upload New Document</h3>
+            <h3 className="text-sm font-medium mb-3">{t("chatDoc.uploadNew")}</h3>
             <div className="space-y-3">
               <div>
                 <Label htmlFor="file-upload" className="cursor-pointer">
@@ -124,7 +126,7 @@ export function ChatDocumentSelector({
                       <div className="text-center">
                         <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
                         <p className="text-sm text-muted-foreground">
-                          Click to select PDF, DOCX, or TXT file
+                          {t("chatDoc.clickToSelect")}
                         </p>
                       </div>
                     )}
@@ -142,7 +144,7 @@ export function ChatDocumentSelector({
               {uploadFile && (
                 <div className="flex gap-2">
                   <Input
-                    placeholder="Document title (optional)"
+                    placeholder={t("chatDoc.docTitle")}
                     value={uploadTitle}
                     onChange={(e) => setUploadTitle(e.target.value)}
                     className="flex-1"
@@ -151,10 +153,10 @@ export function ChatDocumentSelector({
                     {uploading ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Uploading...
+                        {t("chatDoc.uploading")}
                       </>
                     ) : (
-                      "Upload"
+                      t("common.upload")
                     )}
                   </Button>
                   <Button
@@ -164,7 +166,7 @@ export function ChatDocumentSelector({
                       setUploadTitle("")
                     }}
                   >
-                    Cancel
+                    {t("common.cancel")}
                   </Button>
                 </div>
               )}
@@ -174,7 +176,7 @@ export function ChatDocumentSelector({
           {/* Select from Library */}
           <div className="flex-1 flex flex-col overflow-hidden">
             <h3 className="text-sm font-medium mb-3">
-              Select from Library ({selectedDocIds.length} selected)
+              {t("chatDoc.selectFromLibrary", { n: selectedDocIds.length })}
             </h3>
             <ScrollArea className="flex-1">
               {loading ? (
@@ -183,7 +185,7 @@ export function ChatDocumentSelector({
                 </div>
               ) : documents.length === 0 ? (
                 <div className="text-center py-8 text-sm text-muted-foreground">
-                  No documents yet. Upload one above!
+                  {t("chatDoc.noDocuments")}
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -211,9 +213,9 @@ export function ChatDocumentSelector({
                             {doc.category}
                           </span>
                           {doc.is_processed ? (
-                            <span className="text-xs text-green-600">✓ Processed</span>
+                            <span className="text-xs text-green-600">{t("chatDoc.processed")}</span>
                           ) : (
-                            <span className="text-xs text-yellow-600">⏳ Processing...</span>
+                            <span className="text-xs text-yellow-600">{t("chatDoc.processing")}</span>
                           )}
                         </div>
                       </div>
@@ -234,10 +236,10 @@ export function ChatDocumentSelector({
 
         <div className="flex justify-end gap-2 pt-4 border-t">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button onClick={() => onOpenChange(false)}>
-            Done ({selectedDocIds.length} selected)
+            {t("chatDoc.done", { n: selectedDocIds.length })}
           </Button>
         </div>
       </DialogContent>

@@ -27,6 +27,9 @@ redis==5.0.1
 # MinIO - Object Storage
 minio==7.2.0
 
+# Image Processing
+Pillow==10.2.0
+
 # Qdrant Vector Database Client
 qdrant-client==1.7.3
 

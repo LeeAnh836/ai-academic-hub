@@ -218,3 +218,32 @@ async def logout(
     response.delete_cookie(key="refresh_token", domain=settings.COOKIE_DOMAIN)
     
     return {"message": "Logout successful"}
+
+
+# ============================================
+# WebSocket Token endpoint
+# ============================================
+@router.get("/ws-token")
+async def get_ws_token(
+    request_obj: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Lấy token tạm thời để kết nối WebSocket.
+    Vì WebSocket không thể gửi HttpOnly cookies,
+    endpoint này trả về access_token cho client dùng qua query param.
+    """
+    # Return the current access token from cookie
+    access_token = request_obj.cookies.get("access_token")
+    if not access_token:
+        auth_header = request_obj.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            access_token = auth_header[7:]
+
+    if not access_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No token found"
+        )
+
+    return {"token": access_token}
