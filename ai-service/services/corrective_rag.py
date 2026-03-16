@@ -252,7 +252,13 @@ Câu trả lời tổng hợp:"""
             "so sánh", "compare", "khác nhau", "difference",
             "và", " and ", "cả hai", "both",
             "trước và sau", "before and after",
-            "ưu và nhược", "pros and cons"
+            "ưu và nhược", "pros and cons",
+            # Multi-document indicators
+            "tóm tắt", "summarize", "summary",
+            "tổng hợp", "tổng kết",
+            "từng file", "từng tài liệu", "each file", "each document",
+            "mỗi file", "mỗi tài liệu",
+            "các file", "các tài liệu",
         ]
         query_lower = query.lower()
         return any(indicator in query_lower for indicator in multi_hop_indicators)

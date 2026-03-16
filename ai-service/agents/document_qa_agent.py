@@ -3,6 +3,7 @@ Document QA Agent
 Handles question-answering from uploaded documents using RAG
 """
 from typing import Dict, Any, List, Optional
+from collections import OrderedDict
 import logging
 
 from agents import BaseAgent
@@ -259,7 +260,8 @@ class DocumentQAAgent(BaseAgent):
         chat_history: Optional[List[Dict[str, Any]]] = None
     ) -> str:
         """
-        Generate answer from contexts using LLM
+        Generate answer from contexts using LLM.
+        Routes to Map-Reduce pipeline for multi-document queries.
         
         Args:
             query: User query
@@ -268,21 +270,27 @@ class DocumentQAAgent(BaseAgent):
             chat_history: Recent conversation turns for follow-up context
         """
         try:
-            # Build context string
-            context_str = "\n\n".join([
-                f"[Tài liệu {i+1} - {ctx['file_name']}]\n{ctx['chunk_text']}"
-                for i, ctx in enumerate(contexts)
-            ])
+            # Check if this is a multi-document query requiring Map-Reduce
+            if self._is_multi_document_query(query, contexts):
+                logger.info("📑 Multi-document query detected → Map-Reduce pipeline")
+                return await self._generate_map_reduce_answer(
+                    query, contexts, complexity, chat_history
+                )
+
+            # Group contexts by document for better LLM comprehension
+            grouped = self._group_contexts_by_document(contexts)
+            if len(grouped) > 1:
+                # Multiple documents but not a multi-doc-specific query:
+                # still group contexts for clarity
+                context_str = self._build_grouped_context_str(grouped)
+            else:
+                context_str = "\n\n".join([
+                    f"[Tài liệu {i+1} - {ctx.get('file_name', '')}]\n{ctx['chunk_text']}"
+                    for i, ctx in enumerate(contexts)
+                ])
             
             # Build chat history section (last 6 messages = 3 turns)
-            history_section = ""
-            if chat_history:
-                recent = chat_history[-6:]
-                lines = []
-                for msg in recent:
-                    role_label = "Người dùng" if msg.get("role") == "user" else "Trợ lý"
-                    lines.append(f"{role_label}: {msg.get('content', '')}")
-                history_section = "\nLỊCH SỬ TRÒ CHUYỆN GẦN ĐÂY:\n" + "\n".join(lines) + "\n"
+            history_section = self._build_history_section(chat_history)
             
             # Detect request type: creative vs analytical
             request_type = self._detect_request_type(query)
@@ -330,6 +338,228 @@ TRẢ LỜI:"""
         except Exception as e:
             logger.error(f"❌ Answer generation error: {e}")
             return f"Lỗi khi tạo câu trả lời: {e}"
+
+    # =========================================================================
+    # Multi-Document Helpers
+    # =========================================================================
+
+    def _is_multi_document_query(
+        self, query: str, contexts: List[Dict[str, Any]]
+    ) -> bool:
+        """
+        Detect if query is specifically about analyzing/summarizing multiple
+        documents (and contexts actually span more than one document).
+        """
+        unique_docs = set(
+            ctx.get("file_name", ctx.get("document_id", ""))
+            for ctx in contexts
+        )
+        if len(unique_docs) <= 1:
+            return False
+
+        multi_doc_keywords = [
+            "tóm tắt", "summarize", "summary",
+            "các file", "các tài liệu", "các document",
+            "nhiều file", "nhiều tài liệu",
+            "tất cả", "toàn bộ", "all",
+            "từng file", "từng tài liệu", "each file", "each document",
+            "mỗi file", "mỗi tài liệu",
+            "so sánh", "compare", "khác nhau", "difference",
+            "tổng hợp", "tổng kết", "phân tích các",
+        ]
+        query_lower = query.lower()
+        return any(kw in query_lower for kw in multi_doc_keywords)
+
+    def _group_contexts_by_document(
+        self, contexts: List[Dict[str, Any]]
+    ) -> OrderedDict:
+        """Group contexts by their source document, preserving insertion order."""
+        grouped: OrderedDict[str, List[Dict[str, Any]]] = OrderedDict()
+        for ctx in contexts:
+            doc_key = ctx.get("file_name") or ctx.get("document_id") or "Unknown"
+            grouped.setdefault(doc_key, []).append(ctx)
+        return grouped
+
+    def _build_grouped_context_str(
+        self, grouped: OrderedDict
+    ) -> str:
+        """Build a context string where chunks are grouped by document."""
+        parts = []
+        for doc_idx, (doc_name, doc_contexts) in enumerate(grouped.items(), 1):
+            header = f"=== TÀI LIỆU {doc_idx}: {doc_name} ==="
+            chunks = "\n\n".join(
+                f"[Đoạn {ci+1}]: {ctx['chunk_text']}"
+                for ci, ctx in enumerate(doc_contexts)
+            )
+            parts.append(f"{header}\n{chunks}")
+        return "\n\n".join(parts)
+
+    def _build_history_section(
+        self, chat_history: Optional[List[Dict[str, Any]]]
+    ) -> str:
+        """Build chat history section string for prompt."""
+        if not chat_history:
+            return ""
+        recent = chat_history[-6:]
+        lines = [
+            f"{'Người dùng' if msg.get('role') == 'user' else 'Trợ lý'}: "
+            f"{msg.get('content', '')}"
+            for msg in recent
+        ]
+        return "\nLỊCH SỬ TRÒ CHUYỆN GẦN ĐÂY:\n" + "\n".join(lines) + "\n"
+
+    # =========================================================================
+    # Map-Reduce Pipeline for Multi-Document Queries
+    # =========================================================================
+
+    async def _generate_map_reduce_answer(
+        self,
+        query: str,
+        contexts: List[Dict[str, Any]],
+        complexity: str = "moderate",
+        chat_history: Optional[List[Dict[str, Any]]] = None
+    ) -> str:
+        """
+        Map-Reduce answer generation for multi-document queries.
+
+        Map phase:  For each document, extract key information relevant to the
+                    user query (one LLM call per document).
+        Reduce phase: Synthesize per-document summaries into a coherent final
+                      answer that analyses each document separately, then
+                      highlights relationships and differences.
+        """
+        grouped = self._group_contexts_by_document(contexts)
+
+        # ── MAP phase ─────────────────────────────────────────────────────
+        map_system = (
+            "Bạn là trợ lý phân tích tài liệu. Hãy trích xuất và tóm tắt "
+            "các ý chính từ đoạn trích tài liệu dưới đây.\n\n"
+            "YÊU CẦU:\n"
+            "- Tóm tắt các ý chính, khái niệm quan trọng\n"
+            "- Giữ nguyên thuật ngữ chuyên môn\n"
+            "- Nêu rõ chủ đề/nội dung chính của tài liệu\n"
+            "- Giải thích ngắn gọn các khái niệm, KHÔNG chỉ liệt kê từ khóa\n"
+            "- Tối đa 200 từ\n"
+            "- Dùng bullet points cho rõ ràng"
+        )
+
+        per_doc_summaries = []
+        for doc_name, doc_contexts in grouped.items():
+            doc_text = "\n\n".join(ctx["chunk_text"] for ctx in doc_contexts)
+            map_prompt = (
+                f"TÀI LIỆU: {doc_name}\n\nNỘI DUNG:\n{doc_text}\n\n"
+                f"CÂU HỎI NGƯỜI DÙNG: {query}\n\n"
+                "Trích xuất ý chính liên quan đến câu hỏi:"
+            )
+
+            try:
+                provider, model = self.model_manager.get_model("direct_chat", "low")
+                summary = self.model_manager.generate_text(
+                    provider_name=provider,
+                    model_identifier=model,
+                    prompt=map_prompt,
+                    system_instruction=map_system,
+                    temperature=0.2,
+                    max_tokens=600,
+                )
+                per_doc_summaries.append(
+                    {"doc_name": doc_name, "summary": summary.strip()}
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ Map phase failed for {doc_name}: {e}")
+                per_doc_summaries.append(
+                    {"doc_name": doc_name, "summary": doc_text[:800]}
+                )
+
+        logger.info(
+            f"📊 Map phase complete: {len(per_doc_summaries)} document summaries"
+        )
+
+        # ── REDUCE phase ──────────────────────────────────────────────────
+        reduce_context = "\n\n".join(
+            f"=== TÀI LIỆU: {s['doc_name']} ===\n{s['summary']}"
+            for s in per_doc_summaries
+        )
+
+        history_section = self._build_history_section(chat_history)
+
+        reduce_system = self._get_multi_document_system_prompt(
+            complexity, len(grouped)
+        )
+
+        reduce_prompt = (
+            f"PHÂN TÍCH TỪNG TÀI LIỆU:\n{reduce_context}"
+            f"{history_section}\n"
+            f"CÂU HỎI: {query}\n\n"
+            "TRẢ LỜI (phân tích riêng từng tài liệu rồi tổng hợp):"
+        )
+
+        model_complexity = {
+            "simple": "low",
+            "moderate": "medium",
+            "complex": "high",
+        }.get(complexity, "medium")
+
+        provider_name, model_identifier = self.model_manager.get_model(
+            task_type="rag_query", complexity=model_complexity
+        )
+        temperature = 0.2 if complexity in ("moderate", "complex") else 0.5
+
+        print(
+            f"🤖 Map-Reduce REDUCE using {provider_name} | model: "
+            f"{model_identifier} | docs: {len(grouped)} | complexity: {complexity}"
+        )
+
+        answer = self.model_manager.generate_text(
+            provider_name=provider_name,
+            model_identifier=model_identifier,
+            prompt=reduce_prompt,
+            system_instruction=reduce_system,
+            temperature=temperature,
+            max_tokens=4000,
+        )
+
+        return answer
+
+    def _get_multi_document_system_prompt(
+        self, complexity: str, num_docs: int
+    ) -> str:
+        """System prompt for multi-document analysis (Reduce phase)."""
+        return (
+            f"Bạn là trợ lý phân tích tài liệu chuyên nghiệp. "
+            f"Bạn được cung cấp phân tích của {num_docs} tài liệu riêng biệt.\n\n"
+            "NGUYÊN TẮC:\n"
+            "✅ **PHÂN TÍCH RIÊNG**: Phân tích từng tài liệu MỘT CÁCH RIÊNG BIỆT trước\n"
+            "✅ **TỔNG HỢP**: Sau đó tổng hợp các điểm chung và điểm riêng\n"
+            "✅ **CẤU TRÚC RÕ RÀNG**: Dùng heading rõ ràng cho từng tài liệu\n"
+            "✅ **TRÍCH DẪN**: Ghi rõ thông tin đến từ tài liệu nào\n"
+            "✅ **KẾT NỐI**: Chỉ ra mối liên hệ, tiến trình, hoặc sự khác biệt "
+            "giữa các tài liệu\n"
+            "✅ **GIẢI THÍCH**: Giải thích ý nghĩa các khái niệm, KHÔNG chỉ liệt kê "
+            "từ khóa\n\n"
+            "CẤU TRÚC TRẢ LỜI:\n\n"
+            "### 📄 Tài liệu 1: [Tên]\n"
+            "- Nội dung chính, ý chính\n"
+            "- Các khái niệm/thuật ngữ quan trọng kèm giải thích\n\n"
+            "### 📄 Tài liệu 2: [Tên]\n"
+            "- Nội dung chính, ý chính\n"
+            "- Các khái niệm/thuật ngữ quan trọng kèm giải thích\n\n"
+            "[... tiếp tục cho từng tài liệu ...]\n\n"
+            "### 🔗 Tổng hợp & So sánh\n"
+            "- Điểm chung giữa các tài liệu\n"
+            "- Điểm riêng/khác biệt\n"
+            "- Mối liên hệ/tiến trình (nếu có)\n\n"
+            "### 💡 Kết luận\n"
+            "- Tóm tắt tổng thể\n"
+            "- Gợi ý tìm hiểu thêm\n\n"
+            "YÊU CẦU:\n"
+            "✅ Dựa HOÀN TOÀN vào tài liệu\n"
+            "✅ Phân tích TỪNG tài liệu riêng biệt\n"
+            "✅ KHÔNG gộp chung các tài liệu lại\n"
+            "✅ Giải thích mối quan hệ giữa các khái niệm, không chỉ liệt kê "
+            "từ khóa\n"
+            "✅ Kết thúc hoàn chỉnh, không dang dở"
+        )
     
     def _detect_request_type(self, query: str) -> str:
         """
