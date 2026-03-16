@@ -64,6 +64,26 @@ class Settings(BaseSettings):
     GRAPH_MAX_ENTITIES: int = 50  # Max entities to extract per chunk
     GRAPH_TOP_K: int = 10  # Top K related entities from graph
     GRAPH_TRAVERSAL_DEPTH: int = 2  # How deep to traverse relationships
+
+    # Advanced RAG Settings
+    ENABLE_ADVANCED_RAG: bool = True  # Enable full Advanced RAG pipeline
+    # Query Rewriting
+    ENABLE_QUERY_REWRITING: bool = True  # Multi-query expansion
+    QUERY_REWRITE_VARIANTS: int = 3  # Number of query variants to generate
+    # Hybrid Search (BM25 + Vector)
+    ENABLE_BM25_RESCORING: bool = True  # BM25 keyword re-scoring on retrieved chunks
+    BM25_VECTOR_WEIGHT: float = 0.7  # Weight for vector score in hybrid (1-this = BM25 weight)
+    # Re-ranking
+    ENABLE_RERANKING: bool = True  # Enable cross-encoder re-ranking
+    ENABLE_COHERE_RERANK: bool = True  # Use Cohere Rerank API (requires COHERE_API_KEY)
+    COHERE_RERANK_MODEL: str = "rerank-multilingual-v3.0"  # Cohere multilingual rerank model
+    ADVANCED_RAG_INITIAL_TOP_K: int = 15  # Retrieve this many before re-ranking
+    ADVANCED_RAG_FINAL_TOP_K: int = 5  # Return this many after re-ranking
+    # Corrective RAG (CRAG)
+    ENABLE_CORRECTIVE_RAG: bool = True  # Enable self-correction evaluation
+    CRAG_MAX_ATTEMPTS: int = 2  # Max corrective re-retrieval attempts
+    # Multi-hop Reasoning
+    ENABLE_MULTI_HOP: bool = True  # Enable multi-hop for complex queries
     
     # Intent Classification
     ENABLE_INTENT_CLASSIFICATION: bool = True

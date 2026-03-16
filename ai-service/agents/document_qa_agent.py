@@ -8,6 +8,8 @@ import logging
 from agents import BaseAgent
 from services.embedding_service import embedding_service
 from services.hybrid_rag_service import hybrid_rag_service
+from services.advanced_rag_service import advanced_rag_service
+from services.corrective_rag import corrective_rag
 from core.qdrant import qdrant_manager
 from core.config import settings
 from services.query_complexity_analyzer import complexity_analyzer
@@ -68,13 +70,18 @@ class DocumentQAAgent(BaseAgent):
                     "metadata": {"no_documents_selected": True}
                 }
             
+            # Analyze query complexity (before retrieval so it can influence strategy)
+            complexity = complexity_analyzer.analyze(query)
+            logger.info(f"📊 Query complexity: {complexity}")
+            
             # Retrieve relevant contexts
-            contexts = await self._retrieve_contexts(
+            contexts, pipeline_meta = await self._retrieve_contexts(
                 query=query,
                 user_id=user_id,
                 document_ids=document_ids,
                 top_k=top_k,
-                score_threshold=score_threshold
+                score_threshold=score_threshold,
+                complexity=complexity
             )
             
             if not contexts:
@@ -83,10 +90,6 @@ class DocumentQAAgent(BaseAgent):
                     "contexts": [],
                     "metadata": {"no_context_found": True}
                 }
-            
-            # Analyze query complexity
-            complexity = complexity_analyzer.analyze(query)
-            logger.info(f"📊 Query complexity: {complexity}")
             
             # Generate answer from contexts
             answer = await self._generate_answer(query, contexts, complexity, chat_history)
@@ -99,13 +102,22 @@ class DocumentQAAgent(BaseAgent):
             
             self.memory.set_context(user_id, session_id, "last_action", "document_qa")
             
+            # Determine retrieval mode label
+            if settings.ENABLE_ADVANCED_RAG:
+                retrieval_mode = "advanced_rag"
+            elif settings.ENABLE_GRAPH_RAG:
+                retrieval_mode = "hybrid"
+            else:
+                retrieval_mode = "vector_only"
+            
             return {
                 "answer": answer,
                 "contexts": contexts,
                 "metadata": {
                     "model": "gemini-flash",
                     "contexts_count": len(contexts),
-                    "retrieval_mode": "hybrid" if settings.ENABLE_GRAPH_RAG else "vector_only"
+                    "retrieval_mode": retrieval_mode,
+                    "pipeline": pipeline_meta
                 }
             }
         
@@ -123,13 +135,47 @@ class DocumentQAAgent(BaseAgent):
         user_id: str,
         document_ids: Optional[List[str]],
         top_k: int,
-        score_threshold: float
-    ) -> List[Dict[str, Any]]:
+        score_threshold: float,
+        complexity: str = "moderate"
+    ) -> tuple:
         """
-        Retrieve relevant contexts.
-        - When ENABLE_GRAPH_RAG=true: uses HybridRAGService (60% Qdrant + 40% Neo4j)
-        - Otherwise: direct Qdrant vector search
+        Retrieve relevant contexts using the best available strategy:
+        1. Advanced RAG (ENABLE_ADVANCED_RAG=True): Full pipeline with query expansion,
+           BM25 rescoring, re-ranking, CRAG, and multi-hop reasoning
+        2. Hybrid RAG (ENABLE_GRAPH_RAG=True): Vector + Graph (Neo4j) retrieval
+        3. Vector-only: Direct Qdrant similarity search (fallback)
+
+        Returns:
+            Tuple of (contexts, pipeline_metadata)
         """
+        # ── Advanced RAG path ────────────────────────────────────────────
+        if settings.ENABLE_ADVANCED_RAG:
+            try:
+                use_multihop = corrective_rag.should_use_multi_hop(query, complexity)
+                if use_multihop:
+                    logger.info("🔀 Using multi-hop Advanced RAG")
+                    contexts, meta = await advanced_rag_service.retrieve_with_multihop(
+                        query=query,
+                        user_id=user_id,
+                        document_ids=document_ids,
+                        top_k=top_k,
+                        score_threshold=score_threshold
+                    )
+                else:
+                    contexts, meta = await advanced_rag_service.retrieve(
+                        query=query,
+                        user_id=user_id,
+                        document_ids=document_ids,
+                        top_k=top_k,
+                        score_threshold=score_threshold,
+                        complexity=complexity
+                    )
+                logger.info(f"🚀 Advanced RAG retrieved {len(contexts)} contexts")
+                return contexts, meta
+            except Exception as e:
+                logger.warning(f"⚠️ Advanced RAG failed, falling back: {e}")
+                # Fall through to next strategy
+
         # ── Hybrid path (Qdrant + Neo4j) ────────────────────────────────
         if settings.ENABLE_GRAPH_RAG:
             try:
@@ -141,19 +187,19 @@ class DocumentQAAgent(BaseAgent):
                     score_threshold=score_threshold
                 )
                 logger.info(f"🔀 Hybrid RAG retrieved {len(contexts)} contexts")
-                return contexts
+                return contexts, {"pipeline": "hybrid_rag"}
             except Exception as e:
                 logger.warning(f"⚠️ Hybrid RAG failed, falling back to vector-only: {e}")
-                # fall through to vector-only path below
-        
+                # Fall through to vector-only path below
+
         # ── Vector-only path (Qdrant direct) ────────────────────────────
         try:
             query_vector = embedding_service.embed_query(query)
-            
+
             filter_conditions = [
                 FieldCondition(key="user_id", match=MatchValue(value=user_id))
             ]
-            
+
             if document_ids and len(document_ids) > 0:
                 filter_conditions.append(
                     FieldCondition(key="document_id", match=MatchAny(any=document_ids))
@@ -161,10 +207,10 @@ class DocumentQAAgent(BaseAgent):
                 logger.info(f"🔍 Vector search in {len(document_ids)} specific documents")
             else:
                 logger.warning("⚠️ No document_ids provided - returning empty contexts")
-                return []
-            
+                return [], {"pipeline": "vector_only"}
+
             query_filter = Filter(must=filter_conditions)
-            
+
             search_results = qdrant_manager.client.search(
                 collection_name=qdrant_manager.collection_name,
                 query_vector=query_vector,
@@ -172,7 +218,7 @@ class DocumentQAAgent(BaseAgent):
                 limit=top_k,
                 score_threshold=score_threshold
             )
-            
+
             # Fallback with lower threshold if not enough results
             if len(search_results) < max(2, top_k // 2) and settings.RAG_ENABLE_FALLBACK:
                 min_threshold = settings.RAG_MIN_SCORE_THRESHOLD
@@ -185,7 +231,7 @@ class DocumentQAAgent(BaseAgent):
                         limit=top_k,
                         score_threshold=min_threshold
                     )
-            
+
             contexts = []
             for result in search_results:
                 contexts.append({
@@ -197,13 +243,13 @@ class DocumentQAAgent(BaseAgent):
                     "file_name": result.payload.get("file_name", ""),
                     "title": result.payload.get("title", "")
                 })
-            
+
             logger.info(f"📚 Vector-only retrieved {len(contexts)} contexts")
-            return contexts
+            return contexts, {"pipeline": "vector_only"}
         
         except Exception as e:
             logger.error(f"❌ Context retrieval error: {e}")
-            return []
+            return [], {"pipeline": "error", "error": str(e)}
     
     async def _generate_answer(
         self,

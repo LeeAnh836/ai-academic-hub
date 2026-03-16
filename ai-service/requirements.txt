@@ -54,3 +54,6 @@ docker==7.0.0
 
 # JSON schema validation
 jsonschema==4.20.0
+
+# BM25 keyword scoring for Hybrid Search (Advanced RAG)
+rank-bm25==0.2.2
