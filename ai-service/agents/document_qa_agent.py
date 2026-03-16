@@ -505,7 +505,7 @@ TRẢ LỜI:"""
         )
         temperature = 0.2 if complexity in ("moderate", "complex") else 0.5
 
-        print(
+        logger.info(
             f"🤖 Map-Reduce REDUCE using {provider_name} | model: "
             f"{model_identifier} | docs: {len(grouped)} | complexity: {complexity}"
         )
