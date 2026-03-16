@@ -65,7 +65,12 @@ class QueryComplexityAnalyzer:
             
             # Tổng hợp
             'tổng hợp', 'tổng kết', 'summarize', 'overview',
-            'toàn bộ', 'tất cả', 'đầy đủ', 'comprehensive'
+            'toàn bộ', 'tất cả', 'đầy đủ', 'comprehensive',
+
+            # Multi-document / Multi-file
+            'các file', 'các tài liệu', 'nhiều file', 'nhiều tài liệu',
+            'từng file', 'từng tài liệu', 'mỗi file', 'mỗi tài liệu',
+            'tất cả file', 'tất cả tài liệu',
         ]
         
         # Keywords cho câu hỏi moderate (trung bình)
