@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from uuid import UUID
+import hashlib
 
 from core.databases import get_db
 from api.dependencies import get_current_user, CurrentUser
@@ -148,20 +149,15 @@ async def upload_document(
     MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB in bytes
     
     try:
-        # 1. Upload file to MinIO
+        # 1. Read file and compute content hash (dedup key)
         file_data = await file.read()
+        content_hash = hashlib.sha256(file_data).hexdigest()
 
         if len(file_data) > MAX_FILE_SIZE:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail=f"File quá lớn. Kích thước tối đa là 20 MB (file hiện tại: {len(file_data) / (1024*1024):.1f} MB)"
             )
-        upload_result = minio_service.upload_file(
-            file_data=file_data,
-            file_name=file.filename,
-            content_type=file.content_type,
-            user_id=str(current_user.id)
-        )
         
         # 2. Auto-detect category if not provided
         detected_category = category
@@ -187,13 +183,53 @@ async def upload_document(
                 parsed_tags = json.loads(tags)
             except:
                 parsed_tags = [tag.strip() for tag in tags.split(",")]
+
+        # 4. Dedup lookup within the same user: if same hash already processed,
+        # reuse canonical vectors/chunks and skip re-embedding.
+        existing_processed = db.query(Document).filter(
+            Document.user_id == current_user.id,
+            Document.content_hash == content_hash,
+            Document.is_processed == True,
+            Document.processing_status == "completed"
+        ).order_by(Document.created_at.asc()).first()
+
+        if existing_processed:
+            canonical_id = existing_processed.canonical_document_id or existing_processed.id
+            dedup_document = Document(
+                user_id=current_user.id,
+                title=title or file.filename,
+                file_name=file.filename,
+                # Reuse physical object to avoid duplicate MinIO storage.
+                file_path=existing_processed.file_path,
+                content_hash=content_hash,
+                canonical_document_id=canonical_id,
+                file_size=existing_processed.file_size,
+                file_type=existing_processed.file_type,
+                category=detected_category,
+                tags=parsed_tags,
+                is_processed=True,
+                processing_status="completed"
+            )
+            db.add(dedup_document)
+            db.commit()
+            db.refresh(dedup_document)
+            return dedup_document
+
+        # 5. Upload new file to MinIO (no dedup match)
+        upload_result = minio_service.upload_file(
+            file_data=file_data,
+            file_name=file.filename,
+            content_type=file.content_type,
+            user_id=str(current_user.id)
+        )
         
-        # 4. Create document record in PostgreSQL
+        # 6. Create document record in PostgreSQL
         new_document = Document(
             user_id=current_user.id,
             title=title or file.filename,  # Auto-use filename if no title
             file_name=file.filename,
             file_path=upload_result["file_path"],
+            content_hash=content_hash,
             file_size=upload_result["size"],
             file_type=file.content_type,
             category=detected_category,  # Auto-detected or user-provided
@@ -205,8 +241,13 @@ async def upload_document(
         db.add(new_document)
         db.commit()
         db.refresh(new_document)
+
+        # Canonical document for newly processed file is itself.
+        new_document.canonical_document_id = new_document.id
+        db.commit()
+        db.refresh(new_document)
         
-        # 5. Trigger background task to process document
+        # 7. Trigger background task to process document
         # Use wrapper function to create new DB session for background task
         background_tasks.add_task(
             process_document_background,
@@ -436,13 +477,27 @@ async def delete_document(
         )
     
     try:
-        # 1. Delete vectors from Qdrant (if processed)
-        if document.is_processed:
-            await ai_service.delete_document_vectors(document_id, db)
-        # 2. Delete file from MinIO using stored file_path
-        minio_service.delete_file(document.file_path)
-        
-        # 3. Delete from PostgreSQL (cascade will delete chunks & embeddings)
+        canonical_id = document.canonical_document_id or document.id
+
+        # 1. Delete vectors only when this is the last document referencing
+        # the canonical vector set.
+        remaining_canonical_refs = db.query(Document).filter(
+            Document.id != document.id,
+            Document.canonical_document_id == canonical_id,
+        ).count()
+        if document.is_processed and remaining_canonical_refs == 0:
+            await ai_service.delete_document_vectors(canonical_id, db)
+
+        # 2. Delete file object only when no other document references it.
+        remaining_file_refs = db.query(Document).filter(
+            Document.id != document.id,
+            Document.file_path == document.file_path,
+        ).count()
+        if remaining_file_refs == 0:
+            object_name = document.file_path.split("/", 1)[1]
+            minio_service.delete_file(object_name)
+
+        # 3. Delete from PostgreSQL (cascade deletes chunks & embeddings of this row)
         db.delete(document)
         db.commit()
         

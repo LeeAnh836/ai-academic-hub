@@ -10,6 +10,7 @@ from datetime import datetime
 from core.config import settings
 from core.qdrant import qdrant_manager
 from core.memory import memory_manager
+from core.llm_cache import llm_cache
 from routers import embedding, rag, document
 
 # Import GraphRAG router if enabled
@@ -62,6 +63,11 @@ async def lifespan(app: FastAPI):
             print("✅ Redis Memory Manager ready")
         else:
             print("⚠️ Redis unavailable - Memory features disabled")
+
+    # Connect LLM Cache (Redis + memory fallback)
+    if settings.ENABLE_LLM_CACHE:
+        print("🧠 Connecting LLM Cache...")
+        llm_cache.connect()
     
     print("✅ AI Service started successfully!")
     print(f"📡 Listening on {settings.HOST}:{settings.PORT}")
@@ -78,6 +84,9 @@ async def lifespan(app: FastAPI):
     
     if settings.ENABLE_MULTI_AGENT:
         memory_manager.disconnect()
+
+    if settings.ENABLE_LLM_CACHE:
+        llm_cache.disconnect()
     
     print("👋 AI Service stopped")
 

@@ -15,6 +15,10 @@ class Document(BaseModel):
     title = Column(String(500), nullable=False)
     file_name = Column(String(500), nullable=False)
     file_path = Column(Text, nullable=False)
+    # SHA-256 hash of file bytes for dedup (per user).
+    content_hash = Column(String(64), nullable=True, index=True)
+    # Canonical document ID whose vectors/chunks this document reuses.
+    canonical_document_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     file_size = Column(BigInteger, nullable=False)
     file_type = Column(String(100), nullable=False)
     

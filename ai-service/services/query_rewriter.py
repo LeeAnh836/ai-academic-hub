@@ -14,6 +14,7 @@ from typing import List, Optional
 import logging
 
 from core.model_manager import model_manager
+from core.llm_cache import llm_cache
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,14 @@ class QueryRewriter:
         Returns the original query plus N variants.
         """
         try:
+            cache_key = llm_cache.build_key(
+                "query_rewrite_multi_v1",
+                {"query": query.strip().lower(), "num_variants": num_variants},
+            )
+            cached = llm_cache.get(cache_key)
+            if isinstance(cached, list) and cached:
+                return cached
+
             system_prompt = """Bạn là chuyên gia tối ưu hóa truy vấn tìm kiếm.
 Nhiệm vụ: Tạo ra các phiên bản khác nhau của câu hỏi người dùng để cải thiện tìm kiếm tài liệu.
 
@@ -60,7 +69,7 @@ Phương pháp RAG trong AI là gì?"""
 
 Chỉ trả lời các phiên bản, mỗi phiên bản trên 1 dòng:"""
 
-            provider, model = model_manager.get_model("direct_chat", "low")
+            provider, model = model_manager.get_model("query_rewrite", "low")
             response = model_manager.generate_text(
                 provider_name=provider,
                 model_identifier=model,
@@ -79,6 +88,7 @@ Chỉ trả lời các phiên bản, mỗi phiên bản trên 1 dòng:"""
 
             # Always include the original query first
             all_queries = [query] + variants
+            llm_cache.set(cache_key, all_queries)
             logger.info(f"🔄 Query expansion: {len(all_queries)} variants generated")
             return all_queries
 
@@ -92,6 +102,14 @@ Chỉ trả lời các phiên bản, mỗi phiên bản trên 1 dòng:"""
         This helps retrieve foundational/background context.
         """
         try:
+            cache_key = llm_cache.build_key(
+                "query_rewrite_step_back_v1",
+                {"query": query.strip().lower()},
+            )
+            cached = llm_cache.get(cache_key)
+            if isinstance(cached, str) and cached:
+                return cached
+
             system_prompt = """Bạn là chuyên gia tóm tắt câu hỏi.
 Nhiệm vụ: Tạo một câu hỏi TỔNG QUÁT HƠN từ câu hỏi cụ thể, để tìm kiếm nền tảng kiến thức liên quan.
 
@@ -109,7 +127,7 @@ QUAN TRỌNG: Chỉ trả lời câu hỏi tổng quát, không giải thích.""
             user_prompt = f"""Câu hỏi gốc: "{query}"
 Câu hỏi tổng quát hơn:"""
 
-            provider, model = model_manager.get_model("direct_chat", "low")
+            provider, model = model_manager.get_model("query_rewrite", "low")
             response = model_manager.generate_text(
                 provider_name=provider,
                 model_identifier=model,
@@ -121,6 +139,7 @@ Câu hỏi tổng quát hơn:"""
 
             step_back = response.strip()
             if step_back and step_back != query:
+                llm_cache.set(cache_key, step_back)
                 logger.info(f"⬆️ Step-back query: '{step_back}'")
                 return step_back
             return None
@@ -135,6 +154,14 @@ Câu hỏi tổng quát hơn:"""
         Generate a hypothetical answer passage to improve semantic matching.
         """
         try:
+            cache_key = llm_cache.build_key(
+                "query_rewrite_hyde_v1",
+                {"query": query.strip().lower()},
+            )
+            cached = llm_cache.get(cache_key)
+            if isinstance(cached, str) and cached:
+                return cached
+
             system_prompt = """Bạn là chuyên gia học thuật. Viết một đoạn văn ngắn như thể nó xuất hiện trong một tài liệu học thuật trả lời câu hỏi dưới đây.
 Đoạn văn nên:
 - Khoảng 80-120 từ
@@ -147,7 +174,7 @@ Câu hỏi tổng quát hơn:"""
 
 Đoạn văn tài liệu:"""
 
-            provider, model = model_manager.get_model("direct_chat", "low")
+            provider, model = model_manager.get_model("query_rewrite", "low")
             response = model_manager.generate_text(
                 provider_name=provider,
                 model_identifier=model,
@@ -159,6 +186,7 @@ Câu hỏi tổng quát hơn:"""
 
             hyde_passage = response.strip()
             if hyde_passage:
+                llm_cache.set(cache_key, hyde_passage)
                 logger.info(f"📄 HyDE passage generated ({len(hyde_passage)} chars)")
                 return hyde_passage
             return None
@@ -173,6 +201,14 @@ Câu hỏi tổng quát hơn:"""
         Each sub-question can be answered independently, then synthesized.
         """
         try:
+            cache_key = llm_cache.build_key(
+                "query_rewrite_decompose_v1",
+                {"query": query.strip().lower()},
+            )
+            cached = llm_cache.get(cache_key)
+            if isinstance(cached, list) and cached:
+                return cached
+
             system_prompt = """Bạn là chuyên gia phân tích câu hỏi.
 Nhiệm vụ: Phân tích câu hỏi PHỨC TẠP thành 2-4 câu hỏi CON đơn giản hơn.
 
@@ -194,7 +230,7 @@ QUAN TRỌNG: Chỉ trả lời các câu hỏi con, không giải thích."""
             user_prompt = f"""Câu hỏi: "{query}"
 Phân tích:"""
 
-            provider, model = model_manager.get_model("direct_chat", "low")
+            provider, model = model_manager.get_model("query_rewrite", "low")
             response = model_manager.generate_text(
                 provider_name=provider,
                 model_identifier=model,
@@ -208,6 +244,7 @@ Phân tích:"""
 
             # If LLM says it's simple, return original as-is
             if "SIMPLE" in response_clean.upper():
+                llm_cache.set(cache_key, [query])
                 return [query]
 
             sub_queries = [
@@ -217,9 +254,11 @@ Phân tích:"""
             ]
 
             if len(sub_queries) >= 2:
+                llm_cache.set(cache_key, sub_queries)
                 logger.info(f"🔀 Decomposed into {len(sub_queries)} sub-queries")
                 return sub_queries
 
+            llm_cache.set(cache_key, [query])
             return [query]
 
         except Exception as e:

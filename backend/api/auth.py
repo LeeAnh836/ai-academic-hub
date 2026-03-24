@@ -60,6 +60,7 @@ async def register(
 @router.post("/login", response_model=TokenResponse)
 async def login(
     request: LoginRequest,
+    request_obj: Request,
     response: Response,
     db: Session = Depends(get_db)
 ):
@@ -68,17 +69,50 @@ async def login(
     
     Args:
         request: LoginRequest schema
+        request_obj: Request object để lấy IP/user-agent
         response: Response object để set cookies
         db: Database session
     
     Returns:
         Token pair (cũng set vào cookies)
     """
-    result = await auth_service.login_user(
-        email=request.email,
-        password=request.password,
-        db=db
+    from models.users import LoginHistory
+    
+    ip_address = request_obj.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request_obj.client.host if request_obj.client else None)
+    user_agent = request_obj.headers.get("user-agent", "")[:500]
+    
+    try:
+        result = await auth_service.login_user(
+            email=request.email,
+            password=request.password,
+            db=db
+        )
+    except HTTPException as e:
+        # Ghi lại login thất bại
+        # Tìm user để lưu user_id (nếu email tồn tại)
+        from models.users import User as UserModel
+        failed_user = db.query(UserModel).filter(UserModel.email == request.email.lower().strip()).first()
+        if failed_user:
+            failed_log = LoginHistory(
+                user_id=failed_user.id,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                status="failed",
+                failed_reason=e.detail,
+            )
+            db.add(failed_log)
+            db.commit()
+        raise
+    
+    # Ghi lại login thành công
+    success_log = LoginHistory(
+        user_id=result["user"].id,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        status="success",
     )
+    db.add(success_log)
+    db.commit()
     
     access_token = result["tokens"]["access_token"]
     refresh_token = result["tokens"]["refresh_token"]

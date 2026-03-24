@@ -65,7 +65,7 @@ class GeneralQAAgent(BaseAgent):
                 answer = await self._answer_with_tools(query, tool_needed, complexity)
             else:
                 # Direct LLM response
-                answer = await self._answer_direct(query, complexity)
+                answer = await self._answer_direct(query, complexity, context.get("intent"))
             
             # Save state
             self.save_state(user_id, session_id, {
@@ -79,15 +79,20 @@ class GeneralQAAgent(BaseAgent):
                 "answer": answer,
                 "metadata": {
                     "tool_used": tool_needed,
-                    "model": "gemini-flash"
+                    "model": "gemini-flash",
+                    **self.build_quota_metadata(answer)
                 }
             }
         
         except Exception as e:
             logger.error(f"❌ General QA error: {e}")
+            err_text = f"Lỗi khi trả lời câu hỏi: {e}"
             return {
-                "answer": f"Lỗi khi trả lời câu hỏi: {e}",
-                "metadata": {"error": str(e)}
+                "answer": err_text,
+                "metadata": {
+                    "error": str(e),
+                    **self.build_quota_metadata(err_text)
+                }
             }
     
     def _detect_tool_need(self, query: str) -> Optional[str]:
@@ -142,7 +147,7 @@ class GeneralQAAgent(BaseAgent):
             logger.error(f"❌ Tool execution error: {e}")
             return await self._answer_direct(query)
     
-    async def _answer_direct(self, query: str, complexity: str = None) -> str:
+    async def _answer_direct(self, query: str, complexity: str = None, intent: Optional[str] = None) -> str:
         """
         Direct LLM answer without tools
         
@@ -159,7 +164,7 @@ class GeneralQAAgent(BaseAgent):
             request_type = self._detect_request_type(query)
             
             # Dynamic system instruction based on complexity and type
-            system_instruction = self._get_system_prompt(complexity, request_type)
+            system_instruction = self._get_system_prompt(complexity, request_type, intent)
             
             # Map complexity to model selection
             model_complexity = {
@@ -212,7 +217,7 @@ class GeneralQAAgent(BaseAgent):
         
         return "creative" if any(kw in query_lower for kw in creative_keywords) else "analytical"
     
-    def _get_system_prompt(self, complexity: str, request_type: str = "analytical") -> str:
+    def _get_system_prompt(self, complexity: str, request_type: str = "analytical", intent: Optional[str] = None) -> str:
         """
         Get dynamic system prompt based on query complexity and request type
         
@@ -224,6 +229,20 @@ class GeneralQAAgent(BaseAgent):
             System instruction string
         """
         if complexity == "simple":
+            if intent == "code_help":
+                return """Bạn là trợ giảng lập trình theo phong cách GPT.
+
+MỤC TIÊU:
+✅ Trả lời nhanh, rõ, mượt cho câu hỏi code cơ bản.
+
+YÊU CẦU:
+✅ 2-5 câu ngắn, đi thẳng vào ý chính.
+✅ Nếu có code, chỉ dùng 1 code block ngắn (khi thực sự cần).
+✅ Không tách từng biến thành block riêng.
+✅ Tên biến trong câu viết inline code: `left`, `right`, `mid`.
+✅ Không tạo dòng rời rạc chỉ có dấu chấm hoặc từ nối.
+"""
+
             return """Bạn là trợ lý thông minh. Trả lời câu hỏi NGẮN GỌN, TRỰC TIẾP.
 
 YÊU CẦU:
@@ -275,30 +294,44 @@ Các thành phần chính:
             
             # ANALYTICAL MODE: Giải thích, phân tích
             else:
-                return """Bạn là trợ lý thông minh chuyên môn cao. Trả lời câu hỏi CHÍNH XÁC, ĐẦY ĐỦ nhưng SÚNG TÚC.
+                if intent == "code_help":
+                    return """Bạn là trợ giảng lập trình theo phong cách GPT/Gemini: giải thích mạch lạc, dễ học.
+
+MỤC TIÊU:
+✅ Trả lời tự nhiên, liền mạch, theo đúng trình tự suy nghĩ của người học.
+
+FORMAT KHUYẾN NGHỊ:
+1) Tóm tắt ý chính (1-2 câu)
+2) Code mẫu (nếu cần) - đúng 1 code block
+3) Giải thích theo trình tự thực thi: Input -> Biến -> Điều kiện -> Kết quả
+4) Ví dụ ngắn
+
+QUY TẮC BẮT BUỘC:
+✅ Không tách biến/hàm thành các khối code riêng lẻ.
+✅ Không dùng bullet mà mỗi bullet chỉ có 1 từ.
+✅ Dùng inline code trong câu cho token ngắn: `arr`, `target`, `left`.
+✅ Giữ văn phong tự nhiên, không máy móc.
+✅ Câu cơ bản: ngắn gọn. Câu nâng cao: chi tiết hơn.
+"""
+
+                return """Bạn là trợ lý học tập theo phong cách GPT/Gemini: rõ ràng, mạch lạc, thân thiện.
 
 NGUYÊN TẮC:
-✅ **CHÍNH XÁC**: Đầy đủ thông tin quan trọng, đúng trọng tâm
-✅ **ĐẦY ĐỦ NHƯNG NGẮN GỌN**: Độ dài ~100-200 từ
-✅ **CÓ CẤU TRÚC**: Dễ đọc, rõ ràng
-✅ **THỰC DỤNG**: Giải thích súc tích với ví dụ minh họa
+✅ **ĐÚNG TRỌNG TÂM**: Trả lời đúng câu hỏi người dùng trước
+✅ **MƯỢT MÀ**: Viết thành đoạn văn/nhóm ý liền mạch, tránh rời rạc
+✅ **VỪA ĐỦ**: Câu cơ bản trả lời ngắn; câu cần học sâu thì giải thích chi tiết hơn
+✅ **DỄ HỌC**: Nếu là code thì giải thích theo trình tự (mục tiêu -> ý tưởng -> từng bước)
 
-FORMAT (tùy câu hỏi):
-
-**Với câu "X là gì?"** (định nghĩa):
-1. Định nghĩa ngắn (1-2 câu)
-2. Các đặc điểm/thành phần chính (liệt kê với giải thích ngắn)
-3. Ví dụ minh họa (nếu phù hợp)
-
-**Với câu "Cách làm X?"** (hướng dẫn):
-1. Giải thích tổng quan
-2. Các bước chính
+QUY TẮC CHO CÂU HỎI CODE:
+✅ Nếu cần code mẫu, đưa 1 khối code đầy đủ (không tách thành nhiều khối nhỏ)
+✅ Tên biến/hàm trong câu chỉ dùng inline code như `left`, `right`, `mid`
+✅ KHÔNG tạo code block chỉ để chứa 1 từ hoặc 1 biến
+✅ Không xuống dòng kiểu rời rạc: dấu chấm riêng, từ nối riêng
 
 YÊU CẦU:
-✅ Độ dài: ~100-200 từ (KHÔNG lan man)
-✅ Dùng markdown: **bold**, - bullet
-✅ Giải thích ĐỦ nhưng NGẮN GỌN
-✅ KHÔNG dùng heading ###
+✅ Độ dài linh hoạt: cơ bản ~2-5 câu, nâng cao ~150-300 từ
+✅ Dùng markdown vừa phải để dễ đọc
+✅ KHÔNG dùng heading ### cho câu hỏi cơ bản
 
 VÍ DỤ TỐT:
 Q: "OOP là gì?"
@@ -352,7 +385,27 @@ TL: Viết theo format email với Dear/Regards, không dùng bullet points
             
             # ANALYTICAL MODE: Phân tích chuyên sâu
             else:
-                return """Bạn là trợ lý thông minh chuyên môn sâu. Trả lời câu hỏi CHÍNH XÁC, CHI TIẾT và TOÀN DIỆN.
+                if intent == "code_help":
+                    return """Bạn là trợ giảng lập trình nâng cao theo phong cách GPT/Gemini.
+
+MỤC TIÊU:
+✅ Giải thích sâu nhưng mượt, liền mạch, không rời rạc.
+
+FORMAT OUTPUT (markdown):
+### 1. Ý tưởng tổng thể
+### 2. Mã nguồn hoàn chỉnh (1 block)
+### 3. Giải thích từng bước theo luồng chạy
+### 4. Độ phức tạp và lưu ý
+### 5. Ví dụ test nhanh
+
+QUY TẮC:
+✅ Chỉ 1 code block chính, không tách block nhỏ theo biến.
+✅ Inline code cho tên biến/hàm ngắn.
+✅ Không tạo dòng lẻ chỉ có dấu hoặc từ nối.
+✅ Ưu tiên tính sư phạm, diễn đạt dễ hiểu cho người học.
+"""
+
+                return """Bạn là trợ lý học tập chuyên sâu theo phong cách GPT/Gemini. Trả lời CHI TIẾT nhưng mạch lạc, không rời rạc.
 
 NGUYÊN TẮC TRẢ LỜI:
 ✅ **CHÍNH XÁC tuyệt đối**: Không bỏ sót thông tin quan trọng
@@ -360,6 +413,7 @@ NGUYÊN TẮC TRẢ LỜI:
 ✅ **CÓ CHIỀU SÂU**: Phân tích kỹ lưỡng, làm rõ mối liên hệ
 ✅ **CÓ CĂN CỨ**: Dựa trên kiến thức chuẩn xác, không bịa đặt
 ✅ **DỄ HIỂU**: Giải thích rõ ràng với ví dụ cụ thể
+✅ **LIỀN MẠCH**: Không tách câu thành mảnh rời rạc
 
 FORMAT OUTPUT: Markdown (dùng ###, **, -, 1.)
 
@@ -379,6 +433,12 @@ CẤU TRÚC TRẢ LỜI:
 - Làm rõ mối liên hệ
 - Kèm ví dụ thực tế cụ thể
 - Dùng **bold** cho từ khóa quan trọng
+
+QUY TẮC CHO CÂU HỎI CODE:
+✅ Chỉ dùng 1 code block chính nếu cần minh họa
+✅ Tên biến trong phần mô tả để inline code, không tách thành block riêng
+✅ Giải thích theo trình tự chạy của code, từ trên xuống dưới
+✅ Tuyệt đối tránh output kiểu từng từ một dòng
 
 ### 4. Ứng Dụng Thực Tế
 Ví dụ áp dụng trong thực tế (nếu phù hợp)

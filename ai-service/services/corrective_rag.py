@@ -12,6 +12,7 @@ import logging
 
 from core.model_manager import model_manager
 from core.config import settings
+from core.llm_cache import llm_cache
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,33 @@ class CorrectiveRAG:
             text = ctx.get("chunk_text", "")[:300]
             context_preview += f"\n[Đoạn {i+1}]: {text}\n"
 
+        cache_key = llm_cache.build_key(
+            "crag_eval_v1",
+            {
+                "query": query.strip().lower(),
+                "contexts": [
+                    {
+                        "chunk_id": str(ctx.get("chunk_id", "")),
+                        "score": round(float(ctx.get("score", 0.0)), 3),
+                        "text": ctx.get("chunk_text", "")[:160],
+                    }
+                    for ctx in contexts[:5]
+                ],
+            },
+        )
+        cached = llm_cache.get(cache_key)
+        if (
+            isinstance(cached, dict)
+            and "quality" in cached
+            and "confidence" in cached
+            and "reason" in cached
+        ):
+            return (
+                str(cached["quality"]),
+                float(cached["confidence"]),
+                str(cached["reason"]),
+            )
+
         system_prompt = """Bạn là chuyên gia đánh giá chất lượng tìm kiếm tài liệu.
 Nhiệm vụ: Đánh giá xem các đoạn văn được tìm kiếm có đủ thông tin để trả lời câu hỏi không.
 
@@ -80,7 +108,7 @@ Các đoạn văn tìm được:
 Đánh giá:"""
 
         try:
-            provider, model = model_manager.get_model("direct_chat", "low")
+            provider, model = model_manager.get_model("corrective_rag", "low")
             response = model_manager.generate_text(
                 provider_name=provider,
                 model_identifier=model,
@@ -107,6 +135,14 @@ Các đoạn văn tìm được:
             if quality not in [self.QUALITY_SUFFICIENT, self.QUALITY_PARTIAL, self.QUALITY_INSUFFICIENT]:
                 quality = self.QUALITY_PARTIAL
 
+            llm_cache.set(
+                cache_key,
+                {
+                    "quality": quality,
+                    "confidence": confidence,
+                    "reason": reason,
+                },
+            )
             logger.info(f"🔍 CRAG eval: {quality} (confidence: {confidence:.2f}) - {reason}")
             return quality, confidence, reason
 
@@ -138,6 +174,21 @@ Các đoạn văn tìm được:
                 topics = [ctx.get("title", ctx.get("file_name", "")) for ctx in failed_contexts[:3]]
                 found_topics = f"\nTài liệu liên quan tìm được: {', '.join(t for t in topics if t)}"
 
+            cache_key = llm_cache.build_key(
+                "crag_corrective_query_v1",
+                {
+                    "original_query": original_query.strip().lower(),
+                    "attempt": int(attempt),
+                    "topics": [
+                        ctx.get("title", ctx.get("file_name", ""))
+                        for ctx in failed_contexts[:3]
+                    ],
+                },
+            )
+            cached = llm_cache.get(cache_key)
+            if isinstance(cached, str) and cached:
+                return cached
+
             system_prompt = """Bạn là chuyên gia tối ưu hóa tìm kiếm.
 Câu hỏi gốc không tìm được đủ thông tin. Hãy tạo câu hỏi mới, TỐT HƠN để tìm kiếm.
 
@@ -152,7 +203,7 @@ Lần thử: {attempt}{found_topics}
 
 Câu hỏi cải thiện:"""
 
-            provider, model = model_manager.get_model("direct_chat", "low")
+            provider, model = model_manager.get_model("corrective_rag", "low")
             response = model_manager.generate_text(
                 provider_name=provider,
                 model_identifier=model,
@@ -164,6 +215,7 @@ Câu hỏi cải thiện:"""
 
             corrected = response.strip()
             if corrected and corrected != original_query:
+                llm_cache.set(cache_key, corrected)
                 logger.info(f"🔧 Corrective query (attempt {attempt}): '{corrected}'")
                 return corrected
             return None

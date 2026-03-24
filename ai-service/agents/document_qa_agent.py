@@ -60,6 +60,7 @@ class DocumentQAAgent(BaseAgent):
             top_k = context.get("top_k", settings.RAG_TOP_K)
             score_threshold = context.get("score_threshold", settings.RAG_SCORE_THRESHOLD)
             chat_history = context.get("chat_history", [])
+            intent = context.get("intent", "")
             
             # Validate that documents are provided
             # If no document_ids provided, don't search all user documents
@@ -71,6 +72,21 @@ class DocumentQAAgent(BaseAgent):
                     "metadata": {"no_documents_selected": True}
                 }
             
+            # ── Summarization path ─────────────────────────────────────
+            # If intent is summarization, use dedicated pipeline that
+            # scrolls ALL chunks from ALL documents instead of semantic
+            # search (which biases towards only one document).
+            if intent == "summarization" or self._is_summarization_query(query):
+                logger.info("📝 Summarization detected → full-document pipeline")
+                return await self._execute_summarization(
+                    query=query,
+                    user_id=user_id,
+                    session_id=session_id,
+                    document_ids=document_ids,
+                    chat_history=chat_history,
+                )
+            
+            # ── Normal RAG path ────────────────────────────────────────
             # Analyze query complexity (before retrieval so it can influence strategy)
             complexity = complexity_analyzer.analyze(query)
             logger.info(f"📊 Query complexity: {complexity}")
@@ -111,6 +127,9 @@ class DocumentQAAgent(BaseAgent):
             else:
                 retrieval_mode = "vector_only"
             
+            # Build doc_map for frontend clickable links
+            doc_map = self._build_doc_map(contexts)
+            
             return {
                 "answer": answer,
                 "contexts": contexts,
@@ -118,16 +137,22 @@ class DocumentQAAgent(BaseAgent):
                     "model": "gemini-flash",
                     "contexts_count": len(contexts),
                     "retrieval_mode": retrieval_mode,
-                    "pipeline": pipeline_meta
+                    "pipeline": pipeline_meta,
+                    "doc_map": doc_map,
+                    **self.build_quota_metadata(answer)
                 }
             }
         
         except Exception as e:
             logger.error(f"❌ Document QA error: {e}")
+            err_text = f"Lỗi khi tra cứu tài liệu: {e}"
             return {
-                "answer": f"Lỗi khi tra cứu tài liệu: {e}",
+                "answer": err_text,
                 "contexts": [],
-                "metadata": {"error": str(e)}
+                "metadata": {
+                    "error": str(e),
+                    **self.build_quota_metadata(err_text)
+                }
             }
     
     async def _retrieve_contexts(
@@ -285,7 +310,7 @@ class DocumentQAAgent(BaseAgent):
                 context_str = self._build_grouped_context_str(grouped)
             else:
                 context_str = "\n\n".join([
-                    f"[Tài liệu {i+1} - {ctx.get('file_name', '')}]\n{ctx['chunk_text']}"
+                    f"[{ctx.get('file_name', 'Tài liệu')}]\n{ctx['chunk_text']}"
                     for i, ctx in enumerate(contexts)
                 ])
             
@@ -386,7 +411,7 @@ TRẢ LỜI:"""
         """Build a context string where chunks are grouped by document."""
         parts = []
         for doc_idx, (doc_name, doc_contexts) in enumerate(grouped.items(), 1):
-            header = f"=== TÀI LIỆU {doc_idx}: {doc_name} ==="
+            header = f"=== [{doc_name}] ==="
             chunks = "\n\n".join(
                 f"[Đoạn {ci+1}]: {ctx['chunk_text']}"
                 for ci, ctx in enumerate(doc_contexts)
@@ -453,7 +478,7 @@ TRẢ LỜI:"""
             )
 
             try:
-                provider, model = self.model_manager.get_model("direct_chat", "low")
+                provider, model = self.model_manager.get_model("document_map", "low")
                 summary = self.model_manager.generate_text(
                     provider_name=provider,
                     model_identifier=model,
@@ -597,13 +622,13 @@ TRẢ LỜI:"""
 YÊU CẦU:
 ✅ Trả lời TRỰC TIẾP từ tài liệu
 ✅ Chỉ 1-2 câu
-✅ Trích dẫn: "Theo tài liệu, ..."
+✅ Trích dẫn nguồn bằng TÊN FILE trong ngoặc vuông: "Theo [tên_file.pdf], ..."
 ✅ KHÔNG giải thích dài dòng
 ✅ KHÔNG dùng heading/format phức tạp
 
 VÍ DỤ:
-- "Định nghĩa X?" → "Theo tài liệu, X là..."
-- "Công thức Y?" → "Y = ..."
+- "Định nghĩa X?" → "Theo [bai_giang.pdf], X là..."
+- "Công thức Y?" → "Y = ... (theo [chuong3.docx])"
 """
         
         elif complexity == "moderate":
@@ -617,23 +642,18 @@ NGUYÊN TẮC:
 ✅ **PHÙHỢP YÊU CẦU**: Tuân thủ độ dài, phong cách người dùng yêu cầu
 ✅ **SÁNG TẠO**: Tổ chức nội dung từ tài liệu một cách mạch lạc, hấp dẫn
 
-YÊU CẦU:
-✅ KHÔNG dùng format "Định nghĩa/Các thành phần/Giải thích"
-✅ KHÔNG dùng heading/bullet points trừ khi người dùng yêu cầu
-✅ Viết thành đoạn văn liền mạch, tự nhiên
-✅ Tuân thủ độ dài người dùng yêu cầu (nếu có)
-✅ Trích dẫn tự nhiên: "Theo tài liệu,... " hoặc tích hợp vào câu văn
+QUY TẮC TRÍCH DẪN:
+✅ Trích dẫn bằng TÊN FILE trong ngoặc vuông: "Theo [tên_file.pdf], ..."
+✅ KHÔNG dùng cách trích dẫn "Tài liệu 1", "Tài liệu 2" - phải dùng tên file thực
 ✅ Kết thúc hoàn chỉnh, không dang dở
 
 VÍ DỤ:
 YC: "Viết đoạn văn 200 chữ về bảo vệ môi trường từ tài liệu"
-TL: "Bảo vệ môi trường là trách nhiệm của mỗi người... [đoạn văn tự nhiên dựa trên tài liệu]..."
+TL: "Theo [moi_truong.pdf], bảo vệ môi trường là trách nhiệm..."
 
 ❌ KHÔNG TRẢ LỜI KIỂU:
-"Định nghĩa/Tóm tắt: ...
-Các thành phần chính:
-- Điểm 1
-- Điểm 2"
+"Theo Tài liệu 1: ..."
+"Tài liệu 2 cho thấy..."
 """
             
             # ANALYTICAL MODE: Trả lời câu hỏi từ tài liệu
@@ -643,7 +663,7 @@ Các thành phần chính:
 NGUYÊN TẮC:
 ✅ **CHÍNH XÁC tuyệt đối**: Chỉ dựa vào tài liệu cung cấp
 ✅ **ĐẦY ĐỦ**: Không bỏ sót thông tin quan trọng từ tài liệu
-✅ **TRÍCH DẪN RÕ RÀNG**: Ghi rõ nguồn "Theo Tài liệu X, ..."
+✅ **TRÍCH DẪN RÕ RÀNG**: Trích dẫn bằng TÊN FILE trong ngoặc vuông: "Theo [tên_file.pdf], ..."
 ✅ **CÓ CẤU TRÚC**: Dùng markdown để dễ đọc
 
 FORMAT OUTPUT: Markdown (dùng **, -)
@@ -652,17 +672,17 @@ CẤU TRÚC:
 - **Định nghĩa/Tóm tắt**: 1-2 câu ngắn gọn
 - **Các thành phần/khía cạnh chính**: Liệt kê ĐẦY ĐỦ từ tài liệu
 - **Giải thích**: Mỗi thành phần 1-2 câu
-- **Trích dẫn**: "Theo Tài liệu X, ..."
+- **Trích dẫn**: "Theo [tên_file.pdf], ..."
 
 YÊU CẦU:
 ✅ Dựa HOÀN TOÀN vào tài liệu
 ✅ Không thêm kiến thức bên ngoài
-✅ Không quá 250 từ
 ✅ Dùng markdown: **bold**, - bullet
 ✅ CẤM bỏ sót thông tin quan trọng trong tài liệu
+✅ KHÔNG dùng "Tài liệu 1", "Tài liệu 2" - phải dùng TÊN FILE thực
 
 VÍ DỤ TRẢ LỜI TỐT:
-"Theo tài liệu, OOP có **4 nguyên lý cơ bản**: **Encapsulation** (đóng gói), **Inheritance** (kế thừa), **Polymorphism** (đa hình), và **Abstraction** (trừu tượng hóa)..."
+"Theo [bai_giang_OOP.pdf], OOP có **4 nguyên lý cơ bản**: **Encapsulation** (đóng gói), **Inheritance** (kế thừa)..."
 """
         
         else:  # complex
@@ -677,16 +697,13 @@ NGUYÊN TẮC:
 ✅ **PHÙ HỢP YÊU CẦU**: Tuân thủ độ dài, phong cách, cấu trúc
 ✅ **HOÀN CHỈNH**: Có mở bài, thân bài, kết luận (nếu phù hợp)
 
-YÊU CẦU:
-✅ KHÔNG dùng format cứng nhắc "Định nghĩa/Thành phần/Giải thích"
-✅ Tự nhiên, lưu loát như văn bản do người viết
-✅ Có thể dùng heading ### nếu yêu cầu viết bài dài, có cấu trúc
-✅ Tuân thủ độ dài yêu cầu
-✅ Trích dẫn tự nhiên: "Theo tài liệu,..." tích hợp vào nội dung
+QUY TẮC TRÍCH DẪN:
+✅ Trích dẫn bằng TÊN FILE trong ngoặc vuông: "Theo [tên_file.pdf], ..."
+✅ KHÔNG dùng "Tài liệu 1", "Tài liệu 2" - phải dùng tên file thực
 
 VÍ DỤ:
 YC: "Viết bài phân tích dựa trên tài liệu"
-TL: Viết thành bài phân tích hoàn chỉnh, có cấu trúc, dựa 100% vào tài liệu
+TL: "Theo [research_paper.pdf], nghiên cứu cho thấy..."
 """
             
             # ANALYTICAL MODE: Phân tích chuyên sâu từ tài liệu
@@ -697,7 +714,7 @@ NGUYÊN TẮC:
 ✅ **CHÍNH XÁC tuyệt đối**: Chỉ dựa vào tài liệu cung cấp
 ✅ **ĐẦY ĐỦ**: Bao gồm TẤT CẢ thông tin quan trọng từ tài liệu
 ✅ **CÓ CHIỀU SÂU**: Phân tích kỹ lưỡng, kết nối các ý
-✅ **TRÍCH DẪN cụ thể**: Ghi rõ "Theo Tài liệu X, ..."
+✅ **TRÍCH DẪN cụ thể**: Trích dẫn bằng TÊN FILE trong ngoặc vuông: "Theo [tên_file.pdf], ..."
 ✅ **CÓ CẤU TRÚC**: Markdown với heading và formatting
 
 FORMAT OUTPUT: Markdown (dùng ###, **, -, 1.)
@@ -710,16 +727,16 @@ CẤU TRÚC TRẢ LỜI:
 ### 2. Các Điểm Chính
 Liệt kê **ĐẦY ĐỦ TẤT CẢ** các điểm quan trọng từ tài liệu:
 1. **Điểm 1**: Mô tả chi tiết
-   - Trích dẫn: "Theo Tài liệu X, ..."
+   - Trích dẫn: "Theo [tên_file.pdf], ..."
 2. **Điểm 2**: Mô tả chi tiết
-   - Trích dẫn: "Theo Tài liệu X, ..."
+   - Trích dẫn: "Theo [tên_file.pdf], ..."
 (Tiếp tục cho đến hết)
 
 ### 3. Giải Thích Chi Tiết
 - Phân tích TỪNG ĐIỂM đã liệt kê
 - Làm rõ mối liên hệ giữa các điểm
 - Kèm ví dụ cụ thể từ tài liệu
-- Trích dẫn rõ ràng: "**Theo Tài liệu 1**, ..."
+- Trích dẫn rõ ràng: "**Theo [tên_file.pdf]**, ..."
 
 ### 4. Kết Luận và Gợi Ý
 - Tóm lại các điểm chính
@@ -729,8 +746,264 @@ YÊU CẦU:
 ✅ Dựa HOÀN TOÀN vào tài liệu (không tự thêm kiến thức)
 ✅ Chi tiết (~400-600 từ)
 ✅ CẤM bỏ sót thông tin quan trọng
-✅ Trích dẫn cụ thể từng phần
+✅ Trích dẫn cụ thể từng phần bằng TÊN FILE trong ngoặc vuông
+✅ KHÔNG dùng "Tài liệu 1", "Tài liệu 2" - phải dùng tên file thực
 """
+
+
+    # =========================================================================
+    # Summarization Pipeline
+    # =========================================================================
+
+    def _is_summarization_query(self, query: str) -> bool:
+        """Detect if query is a summarization request."""
+        keywords = [
+            "tóm tắt", "summarize", "summary", "tổng hợp", "tổng kết",
+            "nội dung chính", "điểm chính", "key points", "overview",
+            "tóm lại", "tóm gọn", "nói về gì", "bài này về",
+        ]
+        query_lower = query.lower()
+        return any(kw in query_lower for kw in keywords)
+
+    async def _retrieve_full_document(
+        self,
+        user_id: str,
+        document_ids: List[str]
+    ) -> List[Dict[str, Any]]:
+        """Retrieve ALL chunks from ALL specified documents using scroll (not search)."""
+        try:
+            all_contexts = []
+
+            # Scroll per document to avoid limit issues
+            for doc_id in document_ids:
+                filter_conditions = [
+                    FieldCondition(key="user_id", match=MatchValue(value=user_id)),
+                    FieldCondition(key="document_id", match=MatchValue(value=doc_id))
+                ]
+                query_filter = Filter(must=filter_conditions)
+
+                offset = None
+                while True:
+                    results, next_offset = qdrant_manager.client.scroll(
+                        collection_name=qdrant_manager.collection_name,
+                        scroll_filter=query_filter,
+                        limit=100,
+                        offset=offset,
+                        with_payload=True,
+                        with_vectors=False
+                    )
+
+                    for result in results:
+                        all_contexts.append({
+                            "chunk_id": result.id,
+                            "score": 1.0,
+                            "chunk_text": result.payload.get("chunk_text", ""),
+                            "chunk_index": result.payload.get("chunk_index", 0),
+                            "document_id": result.payload.get("document_id", ""),
+                            "file_name": result.payload.get("file_name", ""),
+                            "title": result.payload.get("title", "")
+                        })
+
+                    if next_offset is None:
+                        break
+                    offset = next_offset
+
+            # Sort by document_id then chunk_index
+            all_contexts.sort(
+                key=lambda x: (x["document_id"], x["chunk_index"])
+            )
+
+            logger.info(
+                f"📄 Full document retrieval: {len(all_contexts)} chunks "
+                f"from {len(document_ids)} documents"
+            )
+            return all_contexts
+
+        except Exception as e:
+            logger.error(f"❌ Full document retrieval error: {e}")
+            return []
+
+    async def _execute_summarization(
+        self,
+        query: str,
+        user_id: str,
+        session_id: str,
+        document_ids: List[str],
+        chat_history: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Dedicated summarization pipeline.
+        Scrolls ALL chunks from ALL documents, then uses Map-Reduce
+        to summarize each document separately before combining.
+        """
+        # 1. Retrieve ALL chunks from ALL documents
+        contexts = await self._retrieve_full_document(
+            user_id=user_id,
+            document_ids=document_ids
+        )
+
+        if not contexts:
+            return {
+                "answer": "Không tìm thấy nội dung tài liệu để tóm tắt.",
+                "contexts": [],
+                "metadata": {"no_context_found": True}
+            }
+
+        # 2. Group by document
+        grouped = self._group_contexts_by_document(contexts)
+        num_docs = len(grouped)
+        logger.info(f"📝 Summarizing {num_docs} document(s)")
+
+        # 3. Map phase: summarize each document individually
+        map_system = (
+            "Bạn là trợ lý tóm tắt tài liệu chuyên nghiệp.\n\n"
+            "NHIỆM VỤ: Tóm tắt nội dung tài liệu sau đây.\n\n"
+            "YÊU CẦU:\n"
+            "- Nêu rõ chủ đề/nội dung chính\n"
+            "- Liệt kê các điểm quan trọng bằng bullet points\n"
+            "- Giải thích ngắn gọn từng điểm\n"
+            "- Giữ nguyên thuật ngữ chuyên môn\n"
+            "- Tối đa 300 từ\n"
+            "- Bằng tiếng Việt"
+        )
+
+        per_doc_summaries = []
+        for doc_name, doc_contexts in grouped.items():
+            doc_text = "\n\n".join(ctx["chunk_text"] for ctx in doc_contexts)
+            # Get document_id from first context
+            doc_id = doc_contexts[0].get("document_id", "") if doc_contexts else ""
+
+            map_prompt = (
+                f"TÀI LIỆU: {doc_name}\n\n"
+                f"NỘI DUNG:\n{doc_text}\n\n"
+                f"Tóm tắt nội dung chính của tài liệu này:"
+            )
+
+            try:
+                provider, model = self.model_manager.get_model("summarization", "high")
+                summary = self.model_manager.generate_text(
+                    provider_name=provider,
+                    model_identifier=model,
+                    prompt=map_prompt,
+                    system_instruction=map_system,
+                    temperature=0.3,
+                    max_tokens=800,
+                )
+                per_doc_summaries.append({
+                    "doc_name": doc_name,
+                    "doc_id": doc_id,
+                    "summary": summary.strip()
+                })
+            except Exception as e:
+                logger.warning(f"⚠️ Map phase failed for {doc_name}: {e}")
+                per_doc_summaries.append({
+                    "doc_name": doc_name,
+                    "doc_id": doc_id,
+                    "summary": doc_text[:1000]
+                })
+
+        logger.info(f"📊 Map phase complete: {len(per_doc_summaries)} document summaries")
+
+        # 4. Reduce phase: combine all summaries
+        if num_docs == 1:
+            # Single document — just use the map summary directly
+            s = per_doc_summaries[0]
+            answer = f"### 📄 Tóm tắt [{s['doc_name']}]\n\n{s['summary']}"
+        else:
+            # Multiple documents — use LLM to create combined summary
+            reduce_context = "\n\n".join(
+                f"=== [{s['doc_name']}] ===\n{s['summary']}"
+                for s in per_doc_summaries
+            )
+
+            reduce_system = (
+                f"Bạn là trợ lý tóm tắt chuyên nghiệp. "
+                f"Bạn được cung cấp bản tóm tắt của {num_docs} tài liệu riêng biệt.\n\n"
+                "CẤU TRÚC TRẢ LỜI BẮT BUỘC:\n\n"
+                "Với MỖI tài liệu, viết theo format:\n"
+                "### 📄 [tên_file]\n"
+                "- Nội dung chính, ý chính\n"
+                "- Các khái niệm/thuật ngữ quan trọng\n\n"
+                "[... lặp lại cho từng tài liệu ...]\n\n"
+                "### 🔗 Tổng hợp\n"
+                "- Điểm chung giữa các tài liệu (nếu có)\n"
+                "- Điểm riêng/khác biệt\n\n"
+                "YÊU CẦU:\n"
+                "✅ Tóm tắt RIÊNG BIỆT từng tài liệu, KHÔNG gộp chung\n"
+                "✅ Dùng TÊN FILE trong ngoặc vuông [tên_file] làm heading\n"
+                "✅ KHÔNG dùng 'Tài liệu 1', 'Tài liệu 2'\n"
+                "✅ Giải thích rõ ràng nội dung, không chỉ liệt kê từ khóa\n"
+                "✅ Bằng tiếng Việt"
+            )
+
+            reduce_prompt = (
+                f"TÓM TẮT TỪNG TÀI LIỆU:\n{reduce_context}\n\n"
+                f"YÊU CẦU CỦA NGƯỜI DÙNG: {query}\n\n"
+                "TRẢ LỜI (tóm tắt riêng từng tài liệu rồi tổng hợp):"
+            )
+
+            try:
+                provider, model = self.model_manager.get_model("summarization", "high")
+                answer = self.model_manager.generate_text(
+                    provider_name=provider,
+                    model_identifier=model,
+                    prompt=reduce_prompt,
+                    system_instruction=reduce_system,
+                    temperature=0.3,
+                    max_tokens=4000,
+                )
+            except Exception as e:
+                logger.error(f"❌ Reduce phase error: {e}")
+                # Fallback: concatenate per-doc summaries
+                parts = []
+                for s in per_doc_summaries:
+                    parts.append(f"### 📄 [{s['doc_name']}]\n\n{s['summary']}")
+                answer = "\n\n".join(parts)
+
+        # 5. Save state
+        self.save_state(user_id, session_id, {
+            "last_query": query,
+            "contexts_used": len(contexts)
+        })
+        self.memory.set_context(user_id, session_id, "last_action", "summarization")
+
+        # Build doc_map for frontend clickable links
+        doc_map = self._build_doc_map(contexts)
+
+        return {
+            "answer": answer,
+            "contexts": contexts[:20],  # Return sample contexts
+            "metadata": {
+                "model": "gemini-pro",
+                "contexts_count": len(contexts),
+                "retrieval_mode": "full_document_scroll",
+                "pipeline": {"pipeline": "summarization_map_reduce"},
+                "doc_map": doc_map,
+                **self.build_quota_metadata(answer)
+            }
+        }
+
+    # =========================================================================
+    # Helper: Build document map for frontend link resolution
+    # =========================================================================
+
+    def _build_doc_map(self, contexts: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """
+        Build a map of {file_name -> document_id} for frontend to create
+        clickable links from document citations.
+        """
+        seen = set()
+        doc_map = []
+        for ctx in contexts:
+            file_name = ctx.get("file_name", "")
+            doc_id = ctx.get("document_id", "")
+            if file_name and doc_id and file_name not in seen:
+                doc_map.append({
+                    "file_name": file_name,
+                    "document_id": doc_id
+                })
+                seen.add(file_name)
+        return doc_map
 
 
 # Global singleton

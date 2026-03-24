@@ -86,3 +86,10 @@ class BaseAgent(ABC):
             f"🤖 {self.agent_name} | User: {user_id} | "
             f"Session: {session_id} | Query: {query[:50]}..."
         )
+
+    def build_quota_metadata(self, answer: str = "") -> Dict[str, Any]:
+        """Build quota metadata for UI when rate-limit/quota errors are detected."""
+        quota_info = self.model_manager.get_quota_status(error_message=answer)
+        if quota_info.get("has_quota_issue"):
+            return {"quota_info": quota_info}
+        return {}

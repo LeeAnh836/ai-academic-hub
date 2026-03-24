@@ -31,7 +31,7 @@ import { useChatSessions, useChatMessages, useChatAsk } from "@/hooks/use-chat"
 import { useToast } from "@/hooks/use-toast"
 import { MarkdownMessage } from "@/components/markdown-message"
 import { documentService } from "@/services/document.service"
-import type { ChatMessage } from "@/types/api"
+import type { ChatMessage, DocMapItem, QuotaInfo } from "@/types/api"
 import { useTranslation } from "@/lib/i18n"
 
 // Extended local message type for optimistic updates and file display
@@ -45,6 +45,15 @@ type LocalMessage = ChatMessage & {
   attachedFiles?: AttachedFileInfo[]
   isOptimistic?: boolean
   isLoading?: boolean
+  docMap?: DocMapItem[]
+  quotaInfo?: QuotaInfo | null
+}
+
+function formatResetTime(iso?: string | null): string {
+  if (!iso) return "Không rõ"
+  const dt = new Date(iso)
+  if (isNaN(dt.getTime())) return "Không rõ"
+  return dt.toLocaleString()
 }
 
 const MAX_FILES = 3
@@ -369,7 +378,12 @@ export function AIChatPage() {
           ...(response.user_message as LocalMessage),
           attachedFiles: currentFiles.map((f) => ({ name: f.name, size: f.size, type: f.type })),
         }
-        return [...filtered, realUser, response.ai_message as LocalMessage]
+        const realAi: LocalMessage = {
+          ...(response.ai_message as LocalMessage),
+          docMap: response.doc_map || [],
+          quotaInfo: response.quota_info || null,
+        }
+        return [...filtered, realUser, realAi]
       })
 
       if (isNewSession) {
@@ -586,8 +600,8 @@ export function AIChatPage() {
             </div>
 
             {/* Messages */}
-            <ScrollArea className="flex-1 p-4">
-              <div className="mx-auto max-w-3xl space-y-6">
+            <ScrollArea className="flex-1 px-2 py-4 sm:px-4 md:px-6 lg:px-8">
+              <div className="w-full space-y-6">
                 {messagesLoading && !isDraftMode && localMessages.length === 0 ? (
                   <div className="flex items-center justify-center py-12">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -622,10 +636,10 @@ export function AIChatPage() {
                           <img src="/logo.png" alt="AI" className="h-6 w-6 object-contain" />
                         </div>
                       )}
-                      <div className={cn("flex flex-col gap-1", msg.role === "user" ? "items-end" : "items-start")}>
+                      <div className={cn("flex flex-col gap-1", msg.role === "user" ? "items-end" : "w-full items-start")}>
                         {/* Attached file chips – shown above the text bubble */}
                         {msg.attachedFiles && msg.attachedFiles.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 max-w-[320px]">
+                          <div className="flex flex-wrap gap-1.5 max-w-[420px]">
                             {msg.attachedFiles.map((f, idx) => (
                               <div
                                 key={idx}
@@ -643,10 +657,10 @@ export function AIChatPage() {
                         {/* Message bubble */}
                         <div
                           className={cn(
-                            "max-w-[80%] rounded-2xl px-4 py-3",
+                            "rounded-2xl px-4 py-3",
                             msg.role === "user"
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-secondary text-secondary-foreground"
+                              ? "max-w-[85%] border border-border bg-card text-foreground shadow-sm md:max-w-[75%]"
+                              : "w-full bg-secondary/80 text-foreground"
                           )}
                         >
                           {msg.isLoading ? (
@@ -661,9 +675,26 @@ export function AIChatPage() {
                               </div>
                             </div>
                           ) : (
-                            <MarkdownMessage content={msg.content} role={msg.role as "user" | "assistant"} />
+                            <MarkdownMessage content={msg.content} role={msg.role as "user" | "assistant"} docMap={msg.docMap} />
                           )}
                         </div>
+                        {msg.role === "assistant" && msg.quotaInfo?.has_quota_issue && (
+                          <div className="max-w-full md:max-w-[96%] rounded-xl border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                            <p className="font-semibold">Trang thai quota</p>
+                            <p>
+                              Gemini: {msg.quotaInfo.providers.gemini.limited ? "da gioi han" : "binh thuong"}
+                              {msg.quotaInfo.providers.gemini.limited && (
+                                <> | Reset uoc tinh: {formatResetTime(msg.quotaInfo.providers.gemini.reset_at)}</>
+                              )}
+                            </p>
+                            <p>
+                              Groq: {msg.quotaInfo.providers.groq.limited ? "da gioi han" : "binh thuong"}
+                              {msg.quotaInfo.providers.groq.limited && (
+                                <> | Reset uoc tinh: {formatResetTime(msg.quotaInfo.providers.groq.reset_at)}</>
+                              )}
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))
@@ -673,8 +704,8 @@ export function AIChatPage() {
             </ScrollArea>
 
             {/* ── Input Area ── */}
-            <div className="border-t border-border p-4">
-              <div className="mx-auto max-w-3xl">
+            <div className="border-t border-border px-2 py-4 sm:px-4 md:px-6 lg:px-8">
+              <div className="w-full">
                 {/* Attached file preview */}
                 {attachedFiles.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-2">

@@ -196,6 +196,8 @@ class ChatAskResponse(BaseModel):
     contexts: List[ContextChunkResponse]
     processing_time: float
     model_used: str
+    doc_map: Optional[List[dict]] = []
+    quota_info: Optional[dict] = None
 
     class Config:
         json_schema_extra = {

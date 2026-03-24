@@ -43,12 +43,27 @@ class Settings(BaseSettings):
     # Groq Settings (FALLBACK LLM - FREE)
     GROQ_API_KEY: Optional[str] = None
     GROQ_LLAMA_MODEL: str = "llama-3.3-70b-versatile"
+
+    # OpenAI Settings (GPT)
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_MODEL: str = "gpt-4o-mini"
+
+    # Anthropic Settings (Claude)
+    ANTHROPIC_API_KEY: Optional[str] = None
+    ANTHROPIC_MODEL: str = "claude-3-5-sonnet-20241022"
+
+    # Mistral Settings
+    MISTRAL_API_KEY: Optional[str] = None
+    MISTRAL_MODEL: str = "mistral-small-latest"
     
     # Model Selection Strategy
     PRIMARY_PROVIDER: str = "gemini"  # gemini, groq, cohere
     FALLBACK_PROVIDER: str = "groq"
     ENABLE_GEMINI: bool = True
     ENABLE_GROQ: bool = True
+    ENABLE_OPENAI: bool = False
+    ENABLE_ANTHROPIC: bool = False
+    ENABLE_MISTRAL: bool = True
     
     # RAG Settings
     RAG_TOP_K: int = 5
@@ -84,6 +99,10 @@ class Settings(BaseSettings):
     CRAG_MAX_ATTEMPTS: int = 2  # Max corrective re-retrieval attempts
     # Multi-hop Reasoning
     ENABLE_MULTI_HOP: bool = True  # Enable multi-hop for complex queries
+
+    # LLM Cache Settings (for helper LLM calls, not final answers)
+    ENABLE_LLM_CACHE: bool = True
+    LLM_CACHE_TTL_SECONDS: int = 900  # 15 minutes
     
     # Intent Classification
     ENABLE_INTENT_CLASSIFICATION: bool = True

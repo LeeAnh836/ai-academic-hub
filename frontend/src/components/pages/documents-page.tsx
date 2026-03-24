@@ -1,4 +1,4 @@
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import {
   FileText,
   Upload,
@@ -12,6 +12,7 @@ import {
   FileSpreadsheet,
   Loader2,
 } from "lucide-react"
+import { useSearchParams } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -84,6 +85,7 @@ function getFileTypeFromMime(mimeType: string) {
 }
 
 export function DocumentsPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
   const [searchQuery, setSearchQuery] = useState("")
   const [filterType, setFilterType] = useState("all")
@@ -100,6 +102,20 @@ export function DocumentsPage() {
   const { documents, loading, uploadDocument, deleteDocument } = useDocuments()
   const { toast } = useToast()
   const { t } = useTranslation()
+
+  // Auto-open file preview if ?preview=document_id is in URL
+  useEffect(() => {
+    const previewId = searchParams.get("preview")
+    if (previewId && documents.length > 0) {
+      const doc = documents.find((d) => d.id === previewId)
+      if (doc) {
+        setPreviewDoc(doc)
+        // Clean up the query param so reloading doesn't re-open
+        searchParams.delete("preview")
+        setSearchParams(searchParams, { replace: true })
+      }
+    }
+  }, [documents, searchParams, setSearchParams])
 
   const filteredDocs = documents.filter((doc) => {
     const matchesSearch = doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||

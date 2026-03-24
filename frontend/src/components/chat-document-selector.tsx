@@ -14,7 +14,6 @@ import { useDocuments } from "@/hooks/use-documents"
 import { documentService } from "@/services/document.service"
 import { useToast } from "@/hooks/use-toast"
 import { useTranslation } from "@/lib/i18n"
-import type { Document } from "@/types/api"
 import { cn } from "@/lib/utils"
 
 interface ChatDocumentSelectorProps {

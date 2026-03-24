@@ -16,6 +16,7 @@ from schemas.chat import (
 )
 from models.users import User
 from models.chat import ChatSession, ChatMessage, MessageFeedback, AIUsageHistory
+from models.documents import Document
 import httpx
 import time
 from core.config import settings
@@ -25,6 +26,27 @@ router = APIRouter(
     tags=["chat"],
     dependencies=[Depends(get_current_user)]  # Apply authentication to all endpoints
 )
+
+
+def _resolve_canonical_document_ids(db: Session, user_id: UUID, document_ids: List[str]) -> List[str]:
+    """Map user document IDs to canonical IDs used for vector retrieval."""
+    if not document_ids:
+        return []
+
+    out: List[str] = []
+    seen = set()
+
+    for raw_id in document_ids:
+        doc = db.query(Document).filter(
+            Document.id == raw_id,
+            Document.user_id == user_id
+        ).first()
+        mapped = str(doc.canonical_document_id or doc.id) if doc else str(raw_id)
+        if mapped not in seen:
+            seen.add(mapped)
+            out.append(mapped)
+
+    return out
 
 
 # ============================================
@@ -328,7 +350,8 @@ async def ask_in_chat_session(
         # - document_ids=[...] → Use specified documents AND persist to session
         if request.document_ids is not None:
             # User explicitly specified (including [])
-            doc_ids_to_use = [str(doc_id) for doc_id in request.document_ids] if request.document_ids else None
+            raw_doc_ids = [str(doc_id) for doc_id in request.document_ids] if request.document_ids else []
+            doc_ids_to_use = _resolve_canonical_document_ids(db, current_user.id, raw_doc_ids) if raw_doc_ids else None
             # Persist non-empty doc lists to session so follow-up questions remember context
             if request.document_ids:
                 session.context_documents = [str(doc_id) for doc_id in request.document_ids]
@@ -336,7 +359,11 @@ async def ask_in_chat_session(
         else:
             # Use session's persistent context (no global cross-session fallback)
             if session.context_documents:
-                doc_ids_to_use = [str(doc_id) for doc_id in session.context_documents]
+                doc_ids_to_use = _resolve_canonical_document_ids(
+                    db,
+                    current_user.id,
+                    [str(doc_id) for doc_id in session.context_documents],
+                )
             else:
                 doc_ids_to_use = None
 
@@ -433,7 +460,9 @@ async def ask_in_chat_session(
             ai_message=ai_message,
             contexts=contexts,
             processing_time=processing_time,
-            model_used=metadata.get("model", session.model_name)
+            model_used=metadata.get("model", session.model_name),
+            doc_map=metadata.get("doc_map", []),
+            quota_info=metadata.get("quota_info")
         )
     
     except httpx.HTTPError as e:

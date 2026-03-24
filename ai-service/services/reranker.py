@@ -149,7 +149,7 @@ Các đoạn văn bản:
 Điểm liên quan (0-10) cho từng đoạn:"""
 
         try:
-            provider, model = model_manager.get_model("direct_chat", "low")
+            provider, model = model_manager.get_model("rerank", "low")
             response = model_manager.generate_text(
                 provider_name=provider,
                 model_identifier=model,

@@ -6,6 +6,7 @@ Classifies user intent to determine processing strategy using HYBRID approach:
 """
 from typing import Dict, List, Optional
 from core.model_manager import model_manager
+from core.llm_cache import llm_cache
 
 
 class IntentClassifier:
@@ -184,12 +185,24 @@ class IntentClassifier:
             print(f"================================================\n")
             return "code_help"
         
-        # 2. Data Analysis (very obvious - data/analysis keywords)
-        data_indicators = ["phân tích dữ liệu", "analyze data", "csv", "excel", "doanh thu", "biểu đồ", "thống kê"]
-        if any(indicator in question_lower for indicator in data_indicators):
+        # 2. Data Analysis (only when query clearly targets a dataset/file)
+        strong_data_indicators = [
+            "phân tích dữ liệu", "analyze data", "csv", "excel", "dataframe",
+            "dataset", "dữ liệu trong file", "cột", "hàng", "groupby", "pivot"
+        ]
+        has_strong_data_signal = any(indicator in question_lower for indicator in strong_data_indicators)
+        has_generic_data_signal = any(indicator in question_lower for indicator in ["biểu đồ", "thống kê", "doanh thu"])
+
+        if has_strong_data_signal:
             print(f"✅ Intent: DATA_ANALYSIS (rule-based: data keywords)")
             print(f"================================================\n")
             return "data_analysis"
+
+        # Generic chart/stat questions should be answered by model knowledge
+        if has_generic_data_signal:
+            print(f"✅ Intent: DIRECT_CHAT (rule-based: generic chart/stat knowledge)")
+            print(f"================================================\n")
+            return "direct_chat"
         
         # 3. Explicit Document Reference WITH documents (obvious RAG)
         explicit_doc_refs = ["theo tài liệu", "trong file", "file vừa upload", "file này nói", "trong tài liệu"]
@@ -269,7 +282,8 @@ class IntentClassifier:
 
 6. **data_analysis** - Phân tích dữ liệu CSV/Excel
    - Ví dụ: "Phân tích doanh thu", "Tính trung bình cột A", "Tạo biểu đồ"
-   - Dấu hiệu: "phân tích", "thống kê", "biểu đồ", "csv", "excel"
+    - Dấu hiệu: "phân tích dữ liệu", "csv", "excel", "dataframe", "cột", "hàng"
+    - ⚠️ Nếu KHÔNG có file: câu hỏi kiến thức chung về biểu đồ/statistics phải là direct_chat
 
 🎯 LOGIC QUYẾT ĐỊNH:
 
@@ -284,6 +298,7 @@ class IntentClassifier:
 
 **Bước 3**: Nếu KHÔNG có tài liệu
 - "tài liệu này nói về gì?" → direct_chat (vì không có tài liệu để hỏi)
+- "hãy liệt kê các loại biểu đồ thường dùng" → direct_chat (kiến thức chung)
 
 YÊU CẦU:
 - Trả lời CHỈ TÊN INTENT (homework_solver/code_help/direct_chat/rag_query/summarization/data_analysis)
@@ -294,9 +309,21 @@ YÊU CẦU:
 
 Intent:"""
 
+        cache_key = llm_cache.build_key(
+            "intent_classifier_v1",
+            {
+                "question": question.strip().lower(),
+                "has_documents": has_documents,
+                "document_count": int(document_count),
+            },
+        )
+        cached_intent = llm_cache.get(cache_key)
+        if isinstance(cached_intent, str) and cached_intent:
+            return cached_intent
+
         try:
             # Use Gemini Flash for fast classification
-            provider, model = model_manager.get_model("direct_chat", "low")
+            provider, model = model_manager.get_model("intent_classification", "low")
             
             response = model_manager.generate_text(
                 provider_name=provider,
@@ -313,11 +340,13 @@ Intent:"""
             valid_intents = ["homework_solver", "code_help", "direct_chat", "rag_query", "summarization", "data_analysis", "question_generation"]
             
             if intent in valid_intents:
+                llm_cache.set(cache_key, intent)
                 return intent
             else:
                 # Fallback: extract intent if LLM returns with explanation
                 for valid_intent in valid_intents:
                     if valid_intent in intent:
+                        llm_cache.set(cache_key, valid_intent)
                         return valid_intent
                 
                 # Last resort: default to direct_chat
@@ -348,10 +377,14 @@ Intent:"""
         if any(kw in question_lower for kw in ["code", "function", "class", "debug"]):
             return "code_help"
         
-        if has_documents and any(kw in question_lower for kw in ["theo tài liệu", "trong file", "file này"]):
-            if any(kw in question_lower for kw in ["tóm tắt", "nói về gì"]):
+        # Nếu có tài liệu đính kèm, chỉ dùng RAG/summarization khi có dấu hiệu tham chiếu tài liệu
+        if has_documents:
+            if any(kw in question_lower for kw in ["tóm tắt", "summary", "nội dung chính", "tổng hợp", "nói về gì", "từng file", "mỗi file"]):
                 return "summarization"
-            return "rag_query"
+            if any(kw in question_lower for kw in ["theo tài liệu", "trong file", "file này", "tài liệu này", "file trên"]):
+                return "rag_query"
+            # Có tài liệu nhưng câu hỏi chung -> vẫn trả lời trực tiếp theo kiến thức model
+            return "direct_chat"
         
         # Default
         return "direct_chat"

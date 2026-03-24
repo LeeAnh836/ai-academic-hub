@@ -1,7 +1,7 @@
 """
 Cấu hình kết nối Database PostgreSQL
 """
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from typing import Generator
 
@@ -49,6 +49,21 @@ async def init_db():
     from models.base import Base
     
     Base.metadata.create_all(bind=engine)
+
+    # Lightweight schema evolution for existing deployments without Alembic.
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE documents "
+                "ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64)"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE documents "
+                "ADD COLUMN IF NOT EXISTS canonical_document_id UUID"
+            )
+        )
 
 
 async def close_db():

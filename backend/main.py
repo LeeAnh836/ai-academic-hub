@@ -18,6 +18,7 @@ from api.documents import router as documents_router
 from api.chat import router as chat_router
 from api.groups import router as groups_router
 from api.messaging import router as messaging_router
+from api.admin import router as admin_router
 
 
 # ============================================
@@ -84,6 +85,7 @@ app.include_router(documents_router)
 app.include_router(chat_router)
 app.include_router(groups_router)
 app.include_router(messaging_router)
+app.include_router(admin_router)
 
 
 # ============================================

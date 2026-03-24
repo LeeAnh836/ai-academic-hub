@@ -110,6 +110,26 @@ export interface ContextChunk {
   title?: string
 }
 
+export interface DocMapItem {
+  file_name: string
+  document_id: string
+}
+
+export interface QuotaProviderInfo {
+  limited: boolean
+  reset_at: string | null
+  note?: string
+}
+
+export interface QuotaInfo {
+  has_quota_issue: boolean
+  providers: {
+    gemini: QuotaProviderInfo
+    groq: QuotaProviderInfo
+  }
+  generated_at?: string
+}
+
 export interface ChatAskResponse {
   session_id: string
   user_message: ChatMessage
@@ -117,6 +137,8 @@ export interface ChatAskResponse {
   contexts: ContextChunk[]
   processing_time: number
   model_used: string
+  doc_map: DocMapItem[]
+  quota_info?: QuotaInfo | null
 }
 
 // ============================================
@@ -191,4 +213,91 @@ export interface GroupCreateRequest {
   group_type: string
   is_public: boolean
   description?: string
+}
+
+// ============================================
+// Admin Types
+// ============================================
+export interface AdminStats {
+  total_users: number
+  active_today: number
+  total_groups: number
+  total_files: number
+  total_ai_chats: number
+  storage_used: string
+}
+
+export interface AdminUser {
+  id: string
+  email: string
+  username: string
+  full_name: string | null
+  avatar_url: string | null
+  role: string
+  student_id: string | null
+  is_active: boolean
+  is_verified: boolean
+  online: boolean
+  last_seen: string | null
+  created_at: string
+}
+
+export interface AdminUserListResponse {
+  users: AdminUser[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface AdminGroup {
+  id: string
+  name: string
+  description: string | null
+  members: number
+  files: number
+  last_active: string | null
+  created_at: string
+}
+
+export interface AdminGroupListResponse {
+  groups: AdminGroup[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface AdminDocument {
+  id: string
+  name: string
+  file_type: string
+  size: string
+  owner: string
+  owner_id: string
+  shared: boolean
+  updated_at: string
+  created_at: string
+}
+
+export interface AdminDocumentListResponse {
+  documents: AdminDocument[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface AdminActivityLog {
+  id: string
+  user: string
+  action: string
+  target: string | null
+  ip_address: string | null
+  timestamp: string
+  created_at: string
+}
+
+export interface AdminActivityLogListResponse {
+  logs: AdminActivityLog[]
+  total: number
+  page: number
+  page_size: number
 }

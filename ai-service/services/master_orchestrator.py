@@ -109,10 +109,21 @@ class MasterOrchestrator:
                 has_documents=has_documents,
                 document_count=document_count
             )
+
+            # Safety guard:
+            # If no file/document context is available, force model-knowledge answer
+            # for document-dependent intents to avoid "không tìm thấy file" responses.
+            if not has_documents and intent in {"rag_query", "summarization", "question_generation", "data_analysis"}:
+                logger.info(
+                    f"↪️ Override intent {intent} -> direct_chat (no document/file in session context)"
+                )
+                intent = "direct_chat"
             
             logger.info(f"🎯 Intent: {intent} | Has docs: {has_documents} | Doc count: {document_count}")
             
             # Step 3: Route to appropriate agent
+            # Pass intent into context so agents can adjust their behaviour
+            context["intent"] = intent
             result = await self._route_to_agent(
                 intent=intent,
                 query=processed_query,
