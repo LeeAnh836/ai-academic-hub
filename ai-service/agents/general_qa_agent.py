@@ -2,7 +2,7 @@
 General QA Agent
 Handles general questions with tool support (future: MCP integration)
 """
-from typing import Dict, Any, List, Optional, Literal
+from typing import Dict, Any, List, Optional
 import logging
 
 from agents import BaseAgent
@@ -53,6 +53,9 @@ class GeneralQAAgent(BaseAgent):
         try:
             logger.info(f"💬 General QA: {query}")
             
+            # Get chat history for context continuity
+            chat_history = context.get("chat_history", [])
+            
             # Detect if tools are needed
             tool_needed = self._detect_tool_need(query)
             
@@ -64,8 +67,8 @@ class GeneralQAAgent(BaseAgent):
                 # Use tool-augmented response
                 answer = await self._answer_with_tools(query, tool_needed, complexity)
             else:
-                # Direct LLM response
-                answer = await self._answer_direct(query, complexity, context.get("intent"))
+                # Direct LLM response with conversation history
+                answer = await self._answer_direct(query, complexity, context.get("intent"), chat_history)
             
             # Save state
             self.save_state(user_id, session_id, {
@@ -147,13 +150,15 @@ class GeneralQAAgent(BaseAgent):
             logger.error(f"❌ Tool execution error: {e}")
             return await self._answer_direct(query)
     
-    async def _answer_direct(self, query: str, complexity: str = None, intent: Optional[str] = None) -> str:
+    async def _answer_direct(self, query: str, complexity: str = None, intent: Optional[str] = None, chat_history: Optional[List[Dict]] = None) -> str:
         """
         Direct LLM answer without tools
         
         Args:
             query: User query
             complexity: Query complexity (simple/moderate/complex)
+            intent: Classified intent
+            chat_history: Conversation history for context continuity
         """
         try:
             # Analyze complexity if not provided
@@ -165,6 +170,15 @@ class GeneralQAAgent(BaseAgent):
             
             # Dynamic system instruction based on complexity and type
             system_instruction = self._get_system_prompt(complexity, request_type, intent)
+            
+            # Build conversation context from history
+            history_prompt = self._build_history_prompt(chat_history)
+            
+            # Build final prompt with history context
+            if history_prompt:
+                full_prompt = history_prompt + query
+            else:
+                full_prompt = query
             
             # Map complexity to model selection
             model_complexity = {
@@ -182,12 +196,12 @@ class GeneralQAAgent(BaseAgent):
             # Dynamic temperature: Lower for knowledge, higher for creative
             temperature = 0.3 if complexity in ["moderate", "complex"] else 0.7
             
-            print(f"🤖 Using {provider_name} | model: {model_identifier} | complexity: {complexity} | temp: {temperature}")
+            print(f"🤖 Using {provider_name} | model: {model_identifier} | complexity: {complexity} | temp: {temperature} | history: {len(chat_history or [])} msgs")
             
             answer = self.model_manager.generate_text(
                 provider_name=provider_name,
                 model_identifier=model_identifier,
-                prompt=query,
+                prompt=full_prompt,
                 system_instruction=system_instruction,
                 temperature=temperature,
                 max_tokens=3000
@@ -216,6 +230,42 @@ class GeneralQAAgent(BaseAgent):
         ]
         
         return "creative" if any(kw in query_lower for kw in creative_keywords) else "analytical"
+    
+    def _build_history_prompt(self, chat_history: Optional[List[Dict]] = None) -> str:
+        """
+        Build conversation history section for LLM prompt.
+        This enables context continuity within a chat session,
+        similar to how GPT/Gemini remembers previous messages.
+        
+        Args:
+            chat_history: List of {"role": "user"|"assistant", "content": "..."}
+        
+        Returns:
+            Formatted history string to prepend to user prompt, or empty string
+        """
+        if not chat_history:
+            return ""
+        
+        # Take last 10 messages (5 turns) for context
+        recent = chat_history[-10:]
+        
+        if not recent:
+            return ""
+        
+        lines = []
+        for msg in recent:
+            role = "Người dùng" if msg.get("role") == "user" else "Trợ lý"
+            content = msg.get("content", "")
+            # Truncate very long messages to save tokens (decreased to 1000)
+            if len(content) > 1000:
+                content = content[:1000] + "\n...[truncated]"
+            lines.append(f"{role}: {content}")
+        
+        return (
+            "LỊCH SỬ TRÒ CHUYỆN (dùng để hiểu ngữ cảnh câu hỏi hiện tại):\n"
+            + "\n".join(lines)
+            + "\n\nCÂU HỎI HIỆN TẠI: "
+        )
     
     def _get_system_prompt(self, complexity: str, request_type: str = "analytical", intent: Optional[str] = None) -> str:
         """

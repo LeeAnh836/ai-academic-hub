@@ -425,12 +425,15 @@ TRẢ LỜI:"""
         """Build chat history section string for prompt."""
         if not chat_history:
             return ""
-        recent = chat_history[-6:]
-        lines = [
-            f"{'Người dùng' if msg.get('role') == 'user' else 'Trợ lý'}: "
-            f"{msg.get('content', '')}"
-            for msg in recent
-        ]
+        recent = chat_history[-10:]
+        lines = []
+        for msg in recent:
+            role = "Người dùng" if msg.get("role") == "user" else "Trợ lý"
+            content = msg.get("content", "")
+            # Truncate very long messages to save tokens (decreased to 1000)
+            if len(content) > 1000:
+                content = content[:1000] + "\n...[truncated]"
+            lines.append(f"{role}: {content}")
         return "\nLỊCH SỬ TRÒ CHUYỆN GẦN ĐÂY:\n" + "\n".join(lines) + "\n"
 
     # =========================================================================

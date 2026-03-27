@@ -367,10 +367,10 @@ async def ask_in_chat_session(
             else:
                 doc_ids_to_use = None
 
-        # Build chat history from last 6 DB messages for this session (for context continuity)
+        # Build chat history from last 10 DB messages for this session (5 turns max)
         recent_messages = db.query(ChatMessage).filter(
             ChatMessage.session_id == session_id
-        ).order_by(ChatMessage.created_at.desc()).limit(6).all()
+        ).order_by(ChatMessage.created_at.desc()).limit(10).all()
         chat_history_for_ai = [
             {"role": m.role, "content": m.content}
             for m in reversed(recent_messages)

@@ -81,6 +81,16 @@ class MasterOrchestrator:
             logger.info(f"🚀 Processing query | User: {user_id} | Session: {session_id}")
             logger.info(f"📝 Query: {query[:100]}...")
             
+            # Step 0: Ensure chat_history is available (fallback to Redis memory)
+            if not context.get("chat_history"):
+                redis_history = self.memory.get_chat_history(user_id, session_id, limit=10)
+                if redis_history:
+                    context["chat_history"] = [
+                        {"role": msg["role"], "content": msg["content"]}
+                        for msg in redis_history
+                    ]
+                    logger.info(f"📝 Loaded {len(context['chat_history'])} messages from Redis memory")
+            
             # Step 1: Preprocess query (resolve ambiguity)
             if settings.ENABLE_PROMPT_PREPROCESSING:
                 preprocess_result = await self.prompt_preprocessor.execute(

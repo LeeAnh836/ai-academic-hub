@@ -96,12 +96,11 @@ class PromptPreprocessor(BaseAgent):
     
     def _is_ambiguous(self, query: str) -> bool:
         """
-        Check if query is ambiguous
+        Check if query is ambiguous or references previous context
         
         Criteria:
-            - Very short (< 10 chars)
-            - Only contains ambiguous keywords
-            - No question words
+            - Very short (< 10 chars) with ambiguous keywords
+            - Contains contextual references (đại từ chỉ định, tham chiếu)
         """
         query_lower = query.lower().strip()
         
@@ -112,6 +111,27 @@ class PromptPreprocessor(BaseAgent):
             if len(words) <= 2:
                 if any(kw in query_lower for kw in self.ambiguous_keywords):
                     return True
+        
+        # Contextual reference detection (follow-up questions)
+        # These phrases indicate the user is referring to something from
+        # the previous conversation, similar to how GPT/Gemini handles context
+        contextual_refs = [
+            # Vietnamese demonstrative references
+            "những cái đó", "các cái đó", "những thứ đó", "cái này",
+            "những cái này", "các cái này", "ở trên", "bên trên",
+            "vừa nói", "vừa nêu", "vừa liệt kê", "đã nói",
+            "đã nêu", "đã liệt kê", "nói trên", "kể trên",
+            "ví dụ của chúng", "áp dụng của chúng",
+            "của những", "các loại đó", "những loại đó",
+            "ví dụ áp dụng", "cho ví dụ về",
+            "giải thích thêm", "chi tiết hơn", "nói rõ hơn",
+            "cụ thể hơn", "mở rộng thêm",
+            # English contextual references
+            "those", "these", "above", "mentioned",
+            "the ones", "that you", "you just",
+        ]
+        if any(ref in query_lower for ref in contextual_refs):
+            return True
         
         return False
     
