@@ -5,6 +5,7 @@ Handles question-answering from uploaded documents using RAG
 from typing import Dict, Any, List, Optional
 from collections import OrderedDict
 import logging
+import re
 
 from agents import BaseAgent
 from services.embedding_service import embedding_service
@@ -57,8 +58,8 @@ class DocumentQAAgent(BaseAgent):
             
             # Get parameters
             document_ids = context.get("document_ids")
-            top_k = context.get("top_k", settings.RAG_TOP_K)
-            score_threshold = context.get("score_threshold", settings.RAG_SCORE_THRESHOLD)
+            top_k = int(context.get("top_k") or settings.RAG_TOP_K)
+            score_threshold = float(context.get("score_threshold") or settings.RAG_SCORE_THRESHOLD)
             chat_history = context.get("chat_history", [])
             intent = context.get("intent", "")
             
@@ -100,6 +101,27 @@ class DocumentQAAgent(BaseAgent):
                 score_threshold=score_threshold,
                 complexity=complexity
             )
+
+            # Reference-query fallback:
+            # For prompts like "giai bai nay" / "this image", semantic search
+            # can miss because the query itself is generic. In that case, pull
+            # leading chunks directly from selected documents.
+            if not contexts and self._is_reference_query(query):
+                logger.info(
+                    "🔁 No semantic contexts; trying reference-aware "
+                    "document fallback retrieval"
+                )
+                fallback_contexts = await self._retrieve_reference_contexts(
+                    user_id=user_id,
+                    document_ids=document_ids,
+                    top_k=max(3, top_k),
+                )
+                pipeline_meta["reference_fallback"] = {
+                    "used": bool(fallback_contexts),
+                    "contexts_count": len(fallback_contexts),
+                }
+                if fallback_contexts:
+                    contexts = fallback_contexts
             
             if not contexts:
                 return {
@@ -276,6 +298,109 @@ class DocumentQAAgent(BaseAgent):
         except Exception as e:
             logger.error(f"❌ Context retrieval error: {e}")
             return [], {"pipeline": "error", "error": str(e)}
+
+    def _is_reference_query(self, query: str) -> bool:
+        """
+        Detect deictic queries that usually refer to attached files/images,
+        e.g. "giai bai nay", "lam cau nay", "this image".
+        """
+        query_lower = (query or "").lower().strip()
+        if not query_lower:
+            return False
+
+        explicit_markers = [
+            "file này", "file nay", "tài liệu này", "tai lieu nay",
+            "ảnh này", "anh nay", "hình này", "hinh nay",
+            "this file", "this document", "this image", "attached file",
+        ]
+        if any(marker in query_lower for marker in explicit_markers):
+            return True
+
+        deictic_markers = [
+            "này", "nay", "đó", "do", "kia",
+            "this", "that", "above", "attached",
+        ]
+        object_markers = [
+            "bài", "bai", "bài tập", "bai tap", "đề", "de", "câu", "cau",
+            "hình", "hinh", "ảnh", "anh", "file", "tài liệu", "tai lieu",
+            "problem", "exercise", "question", "image", "document",
+        ]
+
+        has_deictic = any(marker in query_lower for marker in deictic_markers)
+        has_object = any(marker in query_lower for marker in object_markers)
+
+        return has_deictic and has_object and len(query_lower.split()) <= 18
+
+    async def _retrieve_reference_contexts(
+        self,
+        user_id: str,
+        document_ids: List[str],
+        top_k: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Pull leading chunks directly from selected documents (scroll-based)
+        when semantic retrieval returns nothing for generic reference queries.
+        """
+        try:
+            per_doc_collections: List[List[Dict[str, Any]]] = []
+            per_doc_limit = max(4, min(20, top_k + 2))
+
+            for doc_id in document_ids:
+                query_filter = Filter(
+                    must=[
+                        FieldCondition(key="user_id", match=MatchValue(value=user_id)),
+                        FieldCondition(key="document_id", match=MatchValue(value=doc_id)),
+                    ]
+                )
+
+                results, _ = qdrant_manager.client.scroll(
+                    collection_name=qdrant_manager.collection_name,
+                    scroll_filter=query_filter,
+                    limit=per_doc_limit,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+
+                doc_contexts: List[Dict[str, Any]] = []
+                for result in results:
+                    chunk_text = result.payload.get("chunk_text", "")
+                    if not chunk_text:
+                        continue
+                    doc_contexts.append({
+                        "chunk_id": result.id,
+                        "score": 1.0,
+                        "chunk_text": chunk_text,
+                        "chunk_index": result.payload.get("chunk_index", 0),
+                        "document_id": result.payload.get("document_id", ""),
+                        "file_name": result.payload.get("file_name", ""),
+                        "title": result.payload.get("title", ""),
+                        "source": "reference_fallback",
+                    })
+
+                doc_contexts.sort(key=lambda item: item.get("chunk_index", 0))
+                if doc_contexts:
+                    per_doc_collections.append(doc_contexts)
+
+            if not per_doc_collections:
+                return []
+
+            selected: List[Dict[str, Any]] = []
+            remainder: List[Dict[str, Any]] = []
+
+            # First pass: take first chunk from each document
+            for doc_contexts in per_doc_collections:
+                selected.append(doc_contexts[0])
+                remainder.extend(doc_contexts[1:])
+
+            # Second pass: fill remaining slots from subsequent chunks
+            if len(selected) < top_k:
+                selected.extend(remainder[: top_k - len(selected)])
+
+            return selected[:top_k]
+
+        except Exception as e:
+            logger.warning(f"⚠️ Reference fallback retrieval failed: {e}")
+            return []
     
     async def _generate_answer(
         self,
@@ -310,7 +435,7 @@ class DocumentQAAgent(BaseAgent):
                 context_str = self._build_grouped_context_str(grouped)
             else:
                 context_str = "\n\n".join([
-                    f"[{ctx.get('file_name', 'Tài liệu')}]\n{ctx['chunk_text']}"
+                    f"[{self._build_source_label(ctx)}]\n{ctx['chunk_text']}"
                     for i, ctx in enumerate(contexts)
                 ])
             
@@ -323,11 +448,14 @@ class DocumentQAAgent(BaseAgent):
             # Dynamic system instruction based on complexity and type
             system_instruction = self._get_system_prompt_rag(complexity, request_type)
             
-            # Build prompt
-            user_prompt = f"""TÀI LIỆU:
+            # Build prompt with explicit grounding instruction
+            user_prompt = f"""=== BẮT ĐẦU TÀI LIỆU (CHỈ sử dụng thông tin trong phần này) ===
 {context_str}
+=== KẾT THÚC TÀI LIỆU ===
 {history_section}
 CÂU HỎI: {query}
+
+⚠️ NHẮC LẠI: Chỉ trả lời dựa trên NỘI DUNG TÀI LIỆU ở trên. KHÔNG thêm kiến thức bên ngoài. Nếu tài liệu không có thông tin → nói rõ "Tài liệu không đề cập".
 
 TRẢ LỜI:"""
             
@@ -344,8 +472,8 @@ TRẢ LỜI:"""
                 complexity=model_complexity
             )
             
-            # Lower temperature for RAG (need accuracy from documents)
-            temperature = 0.2 if complexity in ["moderate", "complex"] else 0.5
+            # Very low temperature for RAG (strict faithfulness to documents)
+            temperature = 0.1
             
             print(f"🤖 RAG using {provider_name} | model: {model_identifier} | complexity: {complexity} | temp: {temperature}")
             
@@ -355,7 +483,7 @@ TRẢ LỜI:"""
                 prompt=user_prompt,
                 system_instruction=system_instruction,
                 temperature=temperature,
-                max_tokens=4000
+                max_tokens=6000
             )
             
             return answer
@@ -376,7 +504,7 @@ TRẢ LỜI:"""
         documents (and contexts actually span more than one document).
         """
         unique_docs = set(
-            ctx.get("file_name", ctx.get("document_id", ""))
+            self._build_source_label(ctx)
             for ctx in contexts
         )
         if len(unique_docs) <= 1:
@@ -401,7 +529,7 @@ TRẢ LỜI:"""
         """Group contexts by their source document, preserving insertion order."""
         grouped: OrderedDict[str, List[Dict[str, Any]]] = OrderedDict()
         for ctx in contexts:
-            doc_key = ctx.get("file_name") or ctx.get("document_id") or "Unknown"
+            doc_key = self._build_source_label(ctx)
             grouped.setdefault(doc_key, []).append(ctx)
         return grouped
 
@@ -622,9 +750,15 @@ TRẢ LỜI:"""
         if complexity == "simple":
             return """Bạn là trợ lý học tập. Trả lời NGẮN GỌN dựa trên tài liệu.
 
+⛔ NGUYÊN TẮC TUYỆT ĐỐI - PHẢI TUÂN THỦ:
+1. CHỈ trả lời dựa trên thông tin CÓ TRONG tài liệu được cung cấp bên dưới
+2. TUYỆT ĐỐI KHÔNG thêm kiến thức bên ngoài, KHÔNG suy luận, KHÔNG bịa đặt
+3. Nếu tài liệu KHÔNG đề cập đến câu hỏi → trả lời: "Tài liệu không đề cập đến nội dung này."
+4. KHÔNG mở rộng, KHÔNG giải thích thêm ngoài những gì tài liệu viết
+
 YÊU CẦU:
 ✅ Trả lời TRỰC TIẾP từ tài liệu
-✅ Chỉ 1-2 câu
+✅ Chỉ 1-3 câu
 ✅ Trích dẫn nguồn bằng TÊN FILE trong ngoặc vuông: "Theo [tên_file.pdf], ..."
 ✅ KHÔNG giải thích dài dòng
 ✅ KHÔNG dùng heading/format phức tạp
@@ -663,7 +797,14 @@ TL: "Theo [moi_truong.pdf], bảo vệ môi trường là trách nhiệm..."
             else:
                 return """Bạn là trợ lý học tập chuyên môn. Trả lời CHÍNH XÁC và ĐẦY ĐỦ dựa trên tài liệu.
 
-NGUYÊN TẮC:
+⛔ NGUYÊN TẮC TUYỆT ĐỐI - PHẢI TUÂN THỦ:
+1. CHỈ trả lời dựa trên thông tin CÓ TRONG tài liệu được cung cấp bên dưới
+2. TUYỆT ĐỐI KHÔNG thêm kiến thức bên ngoài, KHÔNG suy luận vượt quá nội dung tài liệu
+3. TUYỆT ĐỐI KHÔNG bịa đặt thông tin không có trong tài liệu
+4. Nếu tài liệu KHÔNG đề cập → NÓI RÕ: "Tài liệu không đề cập đến nội dung này."
+5. Mọi câu trả lời PHẢI trích dẫn cụ thể từ đoạn nào trong tài liệu
+
+NGUYÊN TẮC CHẤT LƯỢNG:
 ✅ **CHÍNH XÁC tuyệt đối**: Chỉ dựa vào tài liệu cung cấp
 ✅ **ĐẦY ĐỦ**: Không bỏ sót thông tin quan trọng từ tài liệu
 ✅ **TRÍCH DẪN RÕ RÀNG**: Trích dẫn bằng TÊN FILE trong ngoặc vuông: "Theo [tên_file.pdf], ..."
@@ -672,20 +813,23 @@ NGUYÊN TẮC:
 FORMAT OUTPUT: Markdown (dùng **, -)
 
 CẤU TRÚC:
-- **Định nghĩa/Tóm tắt**: 1-2 câu ngắn gọn
+- **Định nghĩa/Tóm tắt**: 1-2 câu ngắn gọn, trích dẫn từ tài liệu
 - **Các thành phần/khía cạnh chính**: Liệt kê ĐẦY ĐỦ từ tài liệu
-- **Giải thích**: Mỗi thành phần 1-2 câu
+- **Giải thích**: Mỗi thành phần giải thích CHỈ theo nội dung tài liệu
 - **Trích dẫn**: "Theo [tên_file.pdf], ..."
 
 YÊU CẦU:
 ✅ Dựa HOÀN TOÀN vào tài liệu
-✅ Không thêm kiến thức bên ngoài
+✅ KHÔNG thêm kiến thức bên ngoài dù biết câu trả lời
 ✅ Dùng markdown: **bold**, - bullet
 ✅ CẤM bỏ sót thông tin quan trọng trong tài liệu
 ✅ KHÔNG dùng "Tài liệu 1", "Tài liệu 2" - phải dùng TÊN FILE thực
 
 VÍ DỤ TRẢ LỜI TỐT:
 "Theo [bai_giang_OOP.pdf], OOP có **4 nguyên lý cơ bản**: **Encapsulation** (đóng gói), **Inheritance** (kế thừa)..."
+
+❌ VÍ DỤ TRẢ LỜI SAI (ảo giác):
+"OOP là phương pháp lập trình hướng đối tượng..." (← tự thêm kiến thức, không trích dẫn tài liệu)
 """
         
         else:  # complex
@@ -713,10 +857,18 @@ TL: "Theo [research_paper.pdf], nghiên cứu cho thấy..."
             else:
                 return """Bạn là trợ lý học tập chuyên sâu. Trả lời CHI TIẾT và TOÀN DIỆN dựa trên tài liệu.
 
-NGUYÊN TẮC:
+⛔ NGUYÊN TẮC TUYỆT ĐỐI - PHẢI TUÂN THỦ:
+1. CHỈ trả lời dựa trên thông tin CÓ TRONG tài liệu được cung cấp bên dưới
+2. TUYỆT ĐỐI KHÔNG thêm kiến thức bên ngoài, KHÔNG suy luận vượt quá nội dung tài liệu
+3. TUYỆT ĐỐI KHÔNG bịa đặt thông tin không có trong tài liệu
+4. Nếu tài liệu KHÔNG đề cập → NÓI RÕ: "Tài liệu không đề cập đến nội dung này."
+5. Mọi câu trả lời PHẢI trích dẫn cụ thể từ đoạn nào trong tài liệu
+6. Khi tài liệu mô tả mô hình/kiến trúc, PHẢI mô tả CHÍNH XÁC theo tài liệu, KHÔNG thay thế bằng kiến thức chung
+
+NGUYÊN TẮC CHẤT LƯỢNG:
 ✅ **CHÍNH XÁC tuyệt đối**: Chỉ dựa vào tài liệu cung cấp
 ✅ **ĐẦY ĐỦ**: Bao gồm TẤT CẢ thông tin quan trọng từ tài liệu
-✅ **CÓ CHIỀU SÂU**: Phân tích kỹ lưỡng, kết nối các ý
+✅ **CÓ CHIỀU SÂU**: Phân tích kỹ lưỡng, kết nối các ý TRONG tài liệu
 ✅ **TRÍCH DẪN cụ thể**: Trích dẫn bằng TÊN FILE trong ngoặc vuông: "Theo [tên_file.pdf], ..."
 ✅ **CÓ CẤU TRÚC**: Markdown với heading và formatting
 
@@ -725,32 +877,37 @@ FORMAT OUTPUT: Markdown (dùng ###, **, -, 1.)
 CẤU TRÚC TRẢ LỜI:
 
 ### 1. Tóm Tắt
-2-3 câu tóm tắt ngắn gọn từ tài liệu
+2-3 câu tóm tắt ngắn gọn, trích dẫn trực tiếp từ tài liệu
 
 ### 2. Các Điểm Chính
 Liệt kê **ĐẦY ĐỦ TẤT CẢ** các điểm quan trọng từ tài liệu:
-1. **Điểm 1**: Mô tả chi tiết
+1. **Điểm 1**: Mô tả chi tiết ĐÚNG NHƯ tài liệu viết
    - Trích dẫn: "Theo [tên_file.pdf], ..."
-2. **Điểm 2**: Mô tả chi tiết
+2. **Điểm 2**: Mô tả chi tiết ĐÚNG NHƯ tài liệu viết
    - Trích dẫn: "Theo [tên_file.pdf], ..."
 (Tiếp tục cho đến hết)
 
 ### 3. Giải Thích Chi Tiết
-- Phân tích TỪNG ĐIỂM đã liệt kê
-- Làm rõ mối liên hệ giữa các điểm
-- Kèm ví dụ cụ thể từ tài liệu
+- Phân tích TỪNG ĐIỂM đã liệt kê, CHỈ dựa trên nội dung tài liệu
+- Làm rõ mối liên hệ giữa các điểm NHƯ tài liệu trình bày
+- Kèm ví dụ cụ thể từ tài liệu (nếu tài liệu có ví dụ)
 - Trích dẫn rõ ràng: "**Theo [tên_file.pdf]**, ..."
 
-### 4. Kết Luận và Gợi Ý
-- Tóm lại các điểm chính
+### 4. Kết Luận
+- Tóm lại các điểm chính từ tài liệu
 - Gợi ý câu hỏi liên quan để tìm hiểu thêm
 
 YÊU CẦU:
-✅ Dựa HOÀN TOÀN vào tài liệu (không tự thêm kiến thức)
-✅ Chi tiết (~400-600 từ)
+✅ Dựa HOÀN TOÀN vào tài liệu (KHÔNG tự thêm kiến thức dù biết câu trả lời)
+✅ Chi tiết (~400-800 từ)
 ✅ CẤM bỏ sót thông tin quan trọng
 ✅ Trích dẫn cụ thể từng phần bằng TÊN FILE trong ngoặc vuông
 ✅ KHÔNG dùng "Tài liệu 1", "Tài liệu 2" - phải dùng tên file thực
+
+❌ VÍ DỤ TRẢ LỜI SAI (ảo giác):
+- Trả lời theo kiến thức chung về chủ đề mà không trích dẫn tài liệu
+- Mô tả mô hình khác với mô hình trong tài liệu
+- Thêm thông tin "bổ sung" không có trong tài liệu
 """
 
 
@@ -876,34 +1033,17 @@ YÊU CẦU:
             # Get document_id from first context
             doc_id = doc_contexts[0].get("document_id", "") if doc_contexts else ""
 
-            map_prompt = (
-                f"TÀI LIỆU: {doc_name}\n\n"
-                f"NỘI DUNG:\n{doc_text}\n\n"
-                f"Tóm tắt nội dung chính của tài liệu này:"
+            summary = self._generate_map_summary_with_guard(
+                doc_name=doc_name,
+                doc_text=doc_text,
+                base_system_prompt=map_system,
             )
 
-            try:
-                provider, model = self.model_manager.get_model("summarization", "high")
-                summary = self.model_manager.generate_text(
-                    provider_name=provider,
-                    model_identifier=model,
-                    prompt=map_prompt,
-                    system_instruction=map_system,
-                    temperature=0.3,
-                    max_tokens=800,
-                )
-                per_doc_summaries.append({
-                    "doc_name": doc_name,
-                    "doc_id": doc_id,
-                    "summary": summary.strip()
-                })
-            except Exception as e:
-                logger.warning(f"⚠️ Map phase failed for {doc_name}: {e}")
-                per_doc_summaries.append({
-                    "doc_name": doc_name,
-                    "doc_id": doc_id,
-                    "summary": doc_text[:1000]
-                })
+            per_doc_summaries.append({
+                "doc_name": doc_name,
+                "doc_id": doc_id,
+                "summary": summary
+            })
 
         logger.info(f"📊 Map phase complete: {len(per_doc_summaries)} document summaries")
 
@@ -986,9 +1126,133 @@ YÊU CẦU:
             }
         }
 
+    def _generate_map_summary_with_guard(
+        self,
+        doc_name: str,
+        doc_text: str,
+        base_system_prompt: str,
+    ) -> str:
+        """
+        Generate per-document summary with quality guard.
+        If output is too short or looks cut off, retry with stricter prompt.
+        """
+        if not doc_text.strip():
+            return "(Tài liệu không có nội dung văn bản để tóm tắt.)"
+
+        base_prompt = (
+            f"TÀI LIỆU: {doc_name}\n\n"
+            f"NỘI DUNG:\n{doc_text}\n\n"
+            "Tóm tắt nội dung chính của tài liệu này:"
+        )
+
+        strict_system = (
+            "Bạn là trợ lý tóm tắt tài liệu chất lượng cao.\n\n"
+            "BẮT BUỘC:\n"
+            "- Trả lời bằng tiếng Việt\n"
+            "- Viết đầy đủ, không dừng giữa câu\n"
+            "- Độ dài tối thiểu khoảng 350 từ với tài liệu dài\n"
+            "- Có cấu trúc: Chủ đề chính, Các điểm chính (bullet), Kết luận\n"
+            "- Nếu tài liệu ngắn thì tóm tắt ngắn nhưng vẫn phải kết thúc trọn ý"
+        )
+        strict_prompt = (
+            f"TÀI LIỆU: {doc_name}\n\n"
+            f"NỘI DUNG:\n{doc_text}\n\n"
+            "Hãy tóm tắt đầy đủ theo đúng cấu trúc yêu cầu. "
+            "Không được trả lời cụt hoặc dừng giữa câu."
+        )
+
+        attempts = [
+            {
+                "force_provider": None,
+                "system": base_system_prompt,
+                "prompt": base_prompt,
+                "temperature": 0.3,
+                "max_tokens": 1200,
+            },
+            {
+                "force_provider": "mistral",
+                "system": strict_system,
+                "prompt": strict_prompt,
+                "temperature": 0.2,
+                "max_tokens": 1800,
+            },
+            {
+                "force_provider": "gemini",
+                "system": strict_system,
+                "prompt": strict_prompt,
+                "temperature": 0.2,
+                "max_tokens": 1800,
+            },
+        ]
+
+        best_summary = ""
+        for idx, cfg in enumerate(attempts, start=1):
+            try:
+                provider, model = self.model_manager.get_model(
+                    "summarization",
+                    "high",
+                    force_provider=cfg["force_provider"],
+                )
+                summary = self.model_manager.generate_text(
+                    provider_name=provider,
+                    model_identifier=model,
+                    prompt=cfg["prompt"],
+                    system_instruction=cfg["system"],
+                    temperature=cfg["temperature"],
+                    max_tokens=cfg["max_tokens"],
+                ).strip()
+
+                if len(summary) > len(best_summary):
+                    best_summary = summary
+
+                if not self._is_summary_too_short_or_cut(summary, len(doc_text)):
+                    if idx > 1:
+                        logger.info(
+                            f"✅ Summary guard recovered on attempt {idx} for {doc_name}"
+                        )
+                    return summary
+            except Exception as e:
+                logger.warning(f"⚠️ Summary attempt {idx} failed for {doc_name}: {e}")
+
+        if best_summary:
+            logger.warning(
+                f"⚠️ Summary quality still low for {doc_name}; returning longest available output"
+            )
+            return best_summary
+
+        return doc_text[:1200]
+
+    def _is_summary_too_short_or_cut(self, summary: str, source_len: int) -> bool:
+        text = (summary or "").strip()
+        if not text:
+            return True
+
+        # Dynamic minimum length based on source size.
+        min_chars = 300
+        if source_len > 6000:
+            min_chars = 500
+        elif source_len > 3000:
+            min_chars = 400
+
+        if len(text) < min_chars:
+            return True
+
+        if len(text) >= 40 and not re.search(r"[.!?…\]\)\"”']\s*$", text):
+            return True
+
+        return False
+
     # =========================================================================
     # Helper: Build document map for frontend link resolution
     # =========================================================================
+
+    def _build_source_label(self, ctx: Dict[str, Any]) -> str:
+        """Create a stable human-readable source label with short document id."""
+        file_name = (ctx.get("file_name") or "Tài liệu").strip()
+        doc_id = (ctx.get("document_id") or "").strip()
+        if doc_id:
+            return f"{file_name} | id:{doc_id[:8]}"
+        return file_name
 
     def _build_doc_map(self, contexts: List[Dict[str, Any]]) -> List[Dict[str, str]]:
         """
@@ -1000,12 +1264,15 @@ YÊU CẦU:
         for ctx in contexts:
             file_name = ctx.get("file_name", "")
             doc_id = ctx.get("document_id", "")
-            if file_name and doc_id and file_name not in seen:
+            source_label = self._build_source_label(ctx)
+            seen_key = (source_label, doc_id)
+            if file_name and doc_id and seen_key not in seen:
                 doc_map.append({
-                    "file_name": file_name,
+                    "file_name": source_label,
+                    "raw_file_name": file_name,
                     "document_id": doc_id
                 })
-                seen.add(file_name)
+                seen.add(seen_key)
         return doc_map
 
 

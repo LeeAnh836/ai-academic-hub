@@ -80,6 +80,11 @@ export const chatService = {
     })
   },
 
+  // Update session title
+  updateSessionTitle: async (sessionId: string, title: string): Promise<ChatSession> => {
+    return api.patch<ChatSession>(`/api/chat/sessions/${sessionId}/title`, { title })
+  },
+
   // Delete session
   deleteSession: async (sessionId: string): Promise<{ message: string }> => {
     return api.delete(`/api/chat/sessions/${sessionId}`)

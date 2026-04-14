@@ -35,26 +35,37 @@ async def process_document(
         Processing result
     """
     try:
+        import logging
+        logger = logging.getLogger(__name__)
+        
         # Parse metadata
         meta = json.loads(metadata) if metadata else {}
         
         # Read file bytes
         file_content = await file.read()
         
-        # 1. Load document
+        logger.info(f"📥 Processing document: name={file.filename}, type={file.content_type}, "
+                     f"size={len(file_content)/1024:.1f}KB, doc_id={document_id}")
+        
+        # 1. Load document (includes OCR for images/scanned PDFs)
         docs = document_processing_service.load_document_from_bytes(
             file_data=file_content,
             file_name=file.filename,
             file_type=file.content_type
         )
         
+        logger.info(f"📄 Loaded {len(docs)} document(s) from '{file.filename}'")
+        
         # 2. Split into chunks
         chunks = document_processing_service.split_documents(docs)
+        
+        logger.info(f"🔪 Split into {len(chunks)} chunks from '{file.filename}'")
         
         if not chunks:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No chunks generated from document"
+                detail=f"No chunks generated from document '{file.filename}' (type={file.content_type}). "
+                       f"Loaded {len(docs)} raw documents but all were empty after splitting."
             )
         
         # 3. Prepare chunks data

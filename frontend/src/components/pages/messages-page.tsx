@@ -806,6 +806,21 @@ export function MessagesPage() {
     }
   }
 
+  // Handle Paste
+  const handlePaste = (e: React.ClipboardEvent) => {
+    if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+      e.preventDefault()
+      const files = e.clipboardData.files
+      if (files.length === 1) {
+        const isImage = files[0].type.startsWith("image/")
+        handleFileUpload(files[0], isImage)
+      } else {
+        const isImage = Array.from(files).some((f) => f.type.startsWith("image/"))
+        handleMultiFileUpload(files, isImage)
+      }
+    }
+  }
+
   // Start new conversation
   const handleStartConversation = async (otherUser: SearchUserResult) => {
     try {
@@ -1774,6 +1789,7 @@ export function MessagesPage() {
                         setMessage(e.target.value)
                         handleTypingIndicator()
                       }}
+                      onPaste={handlePaste}
                       className="max-h-[200px] min-h-[36px] flex-1 resize-none bg-card"
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.shiftKey) {

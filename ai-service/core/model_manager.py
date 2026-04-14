@@ -36,11 +36,18 @@ class ModelManager:
         self._openai_rate_limited_until = None
         self._anthropic_rate_limited_until = None
         
+        self.gemini_api_keys = []
+        self.current_gemini_key_idx = -1
+        self.gemini_keys_status = {}
+        
         # Google Gemini (REST API)
         if settings.GOOGLE_API_KEY:
             try:
-                self.gemini_api_key = settings.GOOGLE_API_KEY
-                logger.info("✅ Gemini REST API ready")
+                keys = [k.strip() for k in settings.GOOGLE_API_KEY.split(',') if k.strip()]
+                if keys:
+                    self.gemini_api_keys = keys
+                    self.gemini_api_key = keys[0]
+                    logger.info(f"✅ Gemini REST API ready with {len(keys)} rotated keys")
             except Exception as e:
                 logger.error(f"❌ Gemini init failed: {e}")
         
@@ -295,6 +302,103 @@ class ModelManager:
                 )
             
             raise
+            
+    def generate_text_from_image(
+        self,
+        prompt: str,
+        image_bytes: bytes,
+        mime_type: str = "image/jpeg",
+        system_instruction: Optional[str] = None,
+        temperature: float = 0.2
+    ) -> str:
+        """
+        Generate text from an image using Gemini Vision natively.
+        Uses round-robin API keys and automatic rate limit handling.
+        """
+        import base64
+        b64_data = base64.b64encode(image_bytes).decode("utf-8")
+        
+        parts = []
+        if system_instruction:
+            parts.append({"text": f"SYSTEM: {system_instruction}\n"})
+        parts.append({"text": prompt})
+        parts.append({
+            "inlineData": {
+                "mimeType": mime_type,
+                "data": b64_data
+            }
+        })
+        
+        payload = {
+            "contents": [{"parts": parts}],
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": 8192  # Higher limit for detailed OCR
+            },
+            # Prevent safety filters from blocking educational/document content
+            "safetySettings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            ]
+        }
+        
+        # Use gemini-2.5-flash for OCR (fast and capable)
+        model_identifier = settings.GEMINI_FLASH_MODEL
+        keys_to_try = len(getattr(self, 'gemini_api_keys', [1])) or 1
+        last_exception = None
+        
+        img_size_kb = len(image_bytes) / 1024
+        logger.info(f"🖼️ Vision OCR: model={model_identifier}, image={img_size_kb:.1f}KB, mime={mime_type}")
+        
+        for attempt in range(keys_to_try):
+            api_key = self._get_available_gemini_key()
+            masked_key = f"...{api_key[-4:]}" if api_key else "unknown"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_identifier}:generateContent?key={api_key}"
+            
+            try:
+                with httpx.Client(timeout=300.0) as client:
+                    response = client.post(url, json=payload)
+                    response.raise_for_status()
+                    data = response.json()
+
+                    if "candidates" in data and len(data["candidates"]) > 0:
+                        candidate = data["candidates"][0]
+                        # Check for safety block (finishReason == "SAFETY")
+                        finish_reason = candidate.get("finishReason", "")
+                        if finish_reason == "SAFETY":
+                            logger.warning(f"⚠️ Vision response blocked by safety filter (key {masked_key})")
+                            last_exception = Exception(f"Vision blocked by safety filter: {candidate.get('safetyRatings', '')}")
+                            continue
+
+                        text = self._extract_gemini_text(data)
+                        if text:
+                            logger.info(f"✅ Vision OCR completed with key {masked_key}: {len(text)} chars")
+                            return text
+                    
+                    # No usable text in response
+                    logger.warning(f"⚠️ Vision response had no text content: {str(data)[:300]}")
+                    last_exception = ValueError(f"Unexpected Vision response: {str(data)[:300]}")
+                    continue
+                    
+            except httpx.HTTPStatusError as e:
+                body_preview = response.text[:600] if response.text else ""
+                error_msg = f"Gemini Vision API {response.status_code}: {body_preview}"
+                if self._is_rate_limit_error(error_msg):
+                    logger.warning(f"⚠️ Gemini Key {masked_key} hit rate limit (Vision). Rotating...")
+                    if hasattr(self, 'gemini_keys_status'):
+                        self.gemini_keys_status[api_key] = self._estimate_reset_time(daily=False)
+                    last_exception = Exception(error_msg)
+                    continue
+                else:
+                    logger.error(f"❌ Vision API error (key {masked_key}): {error_msg}")
+                    raise Exception(error_msg) from e
+            except Exception as e:
+                logger.error(f"❌ Vision unexpected error (key {masked_key}): {e}")
+                raise e
+                
+        raise last_exception if last_exception else Exception("All Gemini keys failed for Vision OCR")
 
     def _get_fallback_chain(self, provider_name: str) -> list[tuple[str, str]]:
         chain: list[tuple[str, str]] = []
@@ -421,6 +525,27 @@ class ModelManager:
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
     
+    def _get_available_gemini_key(self) -> str:
+        if not getattr(self, 'gemini_api_keys', None):
+            return self.gemini_api_key
+            
+        now = datetime.now(timezone.utc)
+        for _ in range(len(self.gemini_api_keys)):
+            self.current_gemini_key_idx = (self.current_gemini_key_idx + 1) % len(self.gemini_api_keys)
+            key = self.gemini_api_keys[self.current_gemini_key_idx]
+            
+            # Check if this key is rate limited
+            limit_until = self.gemini_keys_status.get(key)
+            if limit_until and datetime.fromisoformat(limit_until) > now:
+                continue
+                
+            self.gemini_keys_status[key] = None
+            return key
+                
+        # If all keys are rate limited, return next one anyway (will likely throw 429 and trigger global fallback)
+        self.current_gemini_key_idx = (self.current_gemini_key_idx + 1) % len(self.gemini_api_keys)
+        return self.gemini_api_keys[self.current_gemini_key_idx]
+
     def _generate_gemini(
         self,
         model_identifier: str,
@@ -432,9 +557,6 @@ class ModelManager:
         """Generate text using Gemini REST API."""
         full_prompt = f"{system_instruction}\n\n{prompt}" if system_instruction else prompt
         
-        # v1beta supports all models including gemini-2.5; v1 does not support 2.5 yet
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_identifier}:generateContent?key={self.gemini_api_key}"
-        
         payload = {
             "contents": [{
                 "parts": [{"text": full_prompt}]
@@ -445,22 +567,66 @@ class ModelManager:
             }
         }
         
-        with httpx.Client(timeout=240.0) as client:
-            response = client.post(url, json=payload)
+        keys_to_try = len(getattr(self, 'gemini_api_keys', [1])) or 1
+        last_exception = None
+        
+        for attempt in range(keys_to_try):
+            api_key = self._get_available_gemini_key()
+            # v1beta supports all models including gemini-2.5; v1 does not support 2.5 yet
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_identifier}:generateContent?key={api_key}"
+            
             try:
-                response.raise_for_status()
+                with httpx.Client(timeout=240.0) as client:
+                    response = client.post(url, json=payload)
+                    response.raise_for_status()
+                    data = response.json()
+
+                    text = self._extract_gemini_text(data)
+                    if text:
+                        return text
+                    
+                    raise ValueError(f"Unexpected Gemini response format: {data}")
             except httpx.HTTPStatusError as e:
                 body_preview = response.text[:600] if response.text else ""
-                raise Exception(f"Gemini API {response.status_code}: {body_preview}") from e
-            data = response.json()
-            
-            # Extract text from response
-            if "candidates" in data and len(data["candidates"]) > 0:
-                candidate = data["candidates"][0]
-                if "content" in candidate and "parts" in candidate["content"]:
-                    return candidate["content"]["parts"][0]["text"]
-            
-            raise ValueError(f"Unexpected Gemini response format: {data}")
+                error_msg = f"Gemini API {response.status_code}: {body_preview}"
+                
+                if self._is_rate_limit_error(error_msg):
+                    masked_key = f"...{api_key[-4:]}" if api_key else "unknown"
+                    logger.warning(f"⚠️ Gemini Key {masked_key} hit rate limit. Rotating...")
+                    if hasattr(self, 'gemini_keys_status'):
+                        self.gemini_keys_status[api_key] = self._estimate_reset_time(daily=False)
+                    last_exception = Exception(error_msg)
+                    continue # Try the next key
+                else:
+                    raise Exception(error_msg) from e
+            except Exception as e:
+                raise e
+                
+        raise last_exception if last_exception else Exception("All Gemini keys failed")
+
+    def _extract_gemini_text(self, data: dict) -> Optional[str]:
+        """
+        Extract full text from Gemini response by concatenating all text parts.
+        Gemini can return multiple text parts in a single candidate.
+        """
+        candidates = data.get("candidates") or []
+        if not candidates:
+            return None
+
+        candidate = candidates[0] or {}
+        content = candidate.get("content") or {}
+        parts = content.get("parts") or []
+
+        text_parts = []
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            text = part.get("text")
+            if text:
+                text_parts.append(text)
+
+        full_text = "".join(text_parts).strip()
+        return full_text or None
 
     def _generate_openai(
         self,
@@ -623,6 +789,9 @@ class ModelManager:
         if system_instruction:
             messages.append({"role": "system", "content": system_instruction})
         messages.append({"role": "user", "content": prompt})
+        
+        # Prevent TPM limit error on Groq Free Tier
+        max_tokens = min(max_tokens, 2048)
         
         completion = self.groq_client.chat.completions.create(
             model=model_identifier,

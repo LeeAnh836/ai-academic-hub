@@ -55,6 +55,19 @@ export const useChatSessions = (autoFetch = true) => {
     }
   }
 
+  const updateTitle = async (sessionId: string, title: string) => {
+    setError(null)
+    try {
+      const updatedSession = await chatService.updateSessionTitle(sessionId, title)
+      setSessions(prev => prev.map(s => s.id === sessionId ? updatedSession : s))
+      return updatedSession
+    } catch (err: any) {
+      const errorMessage = err.message || 'Failed to update session title'
+      setError(errorMessage)
+      throw err
+    }
+  }
+
   useEffect(() => {
     if (autoFetch) {
       fetchSessions()
@@ -68,6 +81,7 @@ export const useChatSessions = (autoFetch = true) => {
     fetchSessions,
     createSession,
     deleteSession,
+    updateTitle,
     refetch: fetchSessions,
   }
 }

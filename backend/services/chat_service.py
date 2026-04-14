@@ -117,6 +117,36 @@ class ChatService:
         return session
     
     @staticmethod
+    def update_chat_session_title(
+        session_id: UUID,
+        user_id: str,
+        title: str,
+        db: Session
+    ) -> ChatSession:
+        """Cập nhật tiêu đề session"""
+        session = db.query(ChatSession).filter(
+            ChatSession.id == session_id
+        ).first()
+        
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Chat session not found"
+            )
+        
+        if session.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to modify this session"
+            )
+        
+        session.title = title
+        db.commit()
+        db.refresh(session)
+        
+        return session
+    
+    @staticmethod
     def create_chat_message(
         session_id: UUID,
         user_id: str,

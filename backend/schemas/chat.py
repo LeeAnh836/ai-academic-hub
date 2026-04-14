@@ -11,6 +11,10 @@ from decimal import Decimal
 # ============================================
 # Request Schemas
 # ============================================
+class ChatSessionUpdateTitleRequest(BaseModel):
+    """Schema cho request cập nhật tiêu đề session"""
+    title: str = Field(..., min_length=1, max_length=255)
+
 class ChatSessionCreateRequest(BaseModel):
     """Schema cho request tạo chat session"""
     title: Optional[str] = Field(None, max_length=255)

@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState, useCallback, useRef } from "react"
-import { X, Download, Printer, Loader2, AlertCircle, FileText, File, RefreshCw } from "lucide-react"
+import { X, Download, Printer, Loader2, AlertCircle, FileText, File, RefreshCw, ImageIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useTranslation } from "@/lib/i18n"
@@ -12,12 +12,13 @@ interface FilePreviewModalProps {
   onClose: () => void
 }
 
-type FileKind = "pdf" | "docx" | "csv" | "txt" | "unsupported"
+type FileKind = "pdf" | "docx" | "csv" | "txt" | "image" | "unsupported"
 
 type PreviewState =
   | { status: "idle" }
   | { status: "loading" }
   | { status: "pdf"; blobUrl: string }
+  | { status: "image"; blobUrl: string }
   | { status: "docx"; container: HTMLElement }
   | { status: "text"; content: string }
   | { status: "csv"; headers: string[]; rows: string[][] }
@@ -26,6 +27,7 @@ type PreviewState =
 
 function resolveKind(mimeType: string, fileName: string): FileKind {
   const ext = fileName.split(".").pop()?.toLowerCase() ?? ""
+  if (mimeType.startsWith("image/") || ["jpg", "jpeg", "png", "webp", "heic", "gif"].includes(ext)) return "image"
   if (mimeType.includes("pdf") || ext === "pdf") return "pdf"
   if (mimeType.includes("wordprocessingml") || mimeType.includes("msword") || ext === "docx" || ext === "doc") return "docx"
   if (mimeType.includes("csv") || ext === "csv") return "csv"
@@ -70,6 +72,16 @@ export function FilePreviewModal({ doc, onClose }: FilePreviewModalProps) {
         blobUrlRef.current = url
         setState({ status: "pdf", blobUrl: url })
       } catch (err: any) { setState({ status: "error", message: t("preview.cantLoadPdf"), detail: err.message }) }
+      return
+    }
+
+    if (kind === "image") {
+      try {
+        const blob = await fetchDocBlob(document.id)
+        const url = URL.createObjectURL(blob)
+        blobUrlRef.current = url
+        setState({ status: "image", blobUrl: url })
+      } catch (err: any) { setState({ status: "error", message: t("preview.cantLoadImage"), detail: err.message }) }
       return
     }
 
@@ -140,7 +152,7 @@ export function FilePreviewModal({ doc, onClose }: FilePreviewModalProps) {
   if (!doc) return null
   const kind = resolveKind(doc.file_type, doc.file_name)
   const ext = doc.file_name.split(".").pop()?.toUpperCase() ?? ""
-  const kindColor: Record<FileKind, string> = { pdf: "text-red-500", docx: "text-blue-500", csv: "text-emerald-500", txt: "text-purple-500", unsupported: "text-muted-foreground" }
+  const kindColor: Record<FileKind, string> = { pdf: "text-red-500", docx: "text-blue-500", csv: "text-emerald-500", txt: "text-purple-500", image: "text-pink-500", unsupported: "text-muted-foreground" }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 sm:p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
@@ -149,7 +161,11 @@ export function FilePreviewModal({ doc, onClose }: FilePreviewModalProps) {
         {/* Toolbar */}
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
           <div className="flex min-w-0 items-center gap-2">
-            <FileText className={cn("h-5 w-5 shrink-0", kindColor[kind])} />
+            {kind === "image" ? (
+              <ImageIcon className={cn("h-5 w-5 shrink-0", kindColor[kind])} />
+            ) : (
+              <FileText className={cn("h-5 w-5 shrink-0", kindColor[kind])} />
+            )}
             <p className="truncate text-sm font-semibold text-foreground">{doc.title}</p>
             <span className="hidden shrink-0 rounded-md bg-secondary px-2 py-0.5 text-xs text-muted-foreground sm:block">{ext}</span>
           </div>
@@ -180,6 +196,16 @@ export function FilePreviewModal({ doc, onClose }: FilePreviewModalProps) {
 
           {state.status === "pdf" && (
             <iframe id="preview-pdf-frame" src={state.blobUrl} className="h-full w-full border-0" title={doc.title} />
+          )}
+
+          {state.status === "image" && (
+            <div className="flex h-full w-full items-center justify-center overflow-auto bg-muted/30 p-4">
+              <img
+                src={state.blobUrl}
+                alt={doc.title}
+                className="max-h-full max-w-full rounded-lg border border-border bg-background object-contain shadow-sm"
+              />
+            </div>
           )}
 
           {state.status === "docx" && (

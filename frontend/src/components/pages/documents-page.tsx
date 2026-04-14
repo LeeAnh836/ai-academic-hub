@@ -11,6 +11,8 @@ import {
   File,
   FileSpreadsheet,
   Loader2,
+  FileCode2,
+  ImageIcon,
 } from "lucide-react"
 import { useSearchParams } from "react-router-dom"
 import { cn } from "@/lib/utils"
@@ -56,6 +58,10 @@ function getFileIcon(type: string) {
       return <FileSpreadsheet className="h-5 w-5 text-emerald-500" />
     case "txt":
       return <FileText className="h-5 w-5 text-purple-500" />
+    case "code":
+      return <FileCode2 className="h-5 w-5 text-amber-500" />
+    case "image":
+      return <ImageIcon className="h-5 w-5 text-pink-500" />
     default:
       return <File className="h-5 w-5 text-muted-foreground" />
   }
@@ -71,16 +77,29 @@ function getFileColor(type: string) {
       return "bg-emerald-50 border-emerald-100"
     case "txt":
       return "bg-purple-50 border-purple-100"
+    case "code":
+      return "bg-amber-50 border-amber-100"
+    case "image":
+      return "bg-pink-50 border-pink-100"
     default:
       return "bg-secondary"
   }
 }
 
-function getFileTypeFromMime(mimeType: string) {
-  if (mimeType.includes('pdf')) return 'pdf'
-  if (mimeType.includes('word') || mimeType.includes('document')) return 'doc'
-  if (mimeType.includes('csv') || mimeType.includes('sheet') || mimeType.includes('excel')) return 'csv'
-  if (mimeType.includes('text/plain') || mimeType === 'text') return 'txt'
+function getFileTypeFromMime(mimeType: string, fileName?: string) {
+  const mt = mimeType.toLowerCase()
+  if (mt.startsWith('image/')) return 'image'
+  if (mt.includes('pdf')) return 'pdf'
+  if (mt.includes('word') || mt.includes('document')) return 'doc'
+  if (mt.includes('csv') || mt.includes('sheet') || mt.includes('excel')) return 'csv'
+  
+  if (fileName) {
+    const ext = fileName.split('.').pop()?.toLowerCase() || ''
+    if (['jpg', 'jpeg', 'png', 'webp', 'heic', 'gif'].includes(ext)) return 'image'
+    if (['py', 'java', 'js', 'html', 'css', 'ts', 'cpp', 'md'].includes(ext)) return 'code'
+  }
+  
+  if (mt.includes('text/plain') || mt === 'text') return 'txt'
   return 'file'
 }
 
@@ -120,7 +139,7 @@ export function DocumentsPage() {
   const filteredDocs = documents.filter((doc) => {
     const matchesSearch = doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          doc.file_name.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesType = filterType === "all" || getFileTypeFromMime(doc.file_type) === filterType
+    const matchesType = filterType === "all" || getFileTypeFromMime(doc.file_type, doc.file_name) === filterType
     return matchesSearch && matchesType
   })
 
@@ -251,7 +270,7 @@ export function DocumentsPage() {
                   ref={fileInputRef}
                   id="file"
                   type="file"
-                  accept=".pdf,.doc,.docx,.txt,.csv"
+                  accept=".pdf,.doc,.docx,.txt,.csv,.xlsx,.py,.java,.js,.ts,.html,.css,.md,.cpp,.jpg,.jpeg,.png,.webp,.heic"
                   onChange={handleFileSelect}
                   className="mt-1"
                 />
@@ -363,6 +382,8 @@ export function DocumentsPage() {
               <SelectItem value="doc">{t("docs.documents")}</SelectItem>
               <SelectItem value="txt">{t("docs.txt")}</SelectItem>
               <SelectItem value="csv">{t("docs.csvExcel")}</SelectItem>
+              <SelectItem value="image">{t("docs.images")}</SelectItem>
+              <SelectItem value="code">Mã nguồn & Cấu hình</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -412,8 +433,8 @@ export function DocumentsPage() {
             >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between">
-                  <div className={cn("flex h-12 w-12 items-center justify-center rounded-xl border", getFileColor(getFileTypeFromMime(doc.file_type)))}>
-                    {getFileIcon(getFileTypeFromMime(doc.file_type))}
+                  <div className={cn("flex h-12 w-12 items-center justify-center rounded-xl border", getFileColor(getFileTypeFromMime(doc.file_type, doc.file_name)))}>
+                    {getFileIcon(getFileTypeFromMime(doc.file_type, doc.file_name))}
                   </div>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -479,7 +500,7 @@ export function DocumentsPage() {
                 title={t("docs.dblClickPreview")}
               >
                 <div className="flex flex-1 items-center gap-3 overflow-hidden">
-                  {getFileIcon(getFileTypeFromMime(doc.file_type))}
+                  {getFileIcon(getFileTypeFromMime(doc.file_type, doc.file_name))}
                   <span className="truncate text-sm font-medium text-foreground">{doc.title}</span>
                   {doc.is_processed && (
                     <Badge variant="secondary" className="shrink-0 text-xs">

@@ -133,7 +133,7 @@ export function ChatDocumentSelector({
                   <Input
                     id="file-upload"
                     type="file"
-                    accept=".pdf,.docx,.txt"
+                    accept=".pdf,.docx,.txt,.csv,.xlsx,.py,.java,.js,.ts,.html,.css,.md,.cpp,.jpg,.jpeg,.png,.webp,.heic"
                     onChange={handleFileChange}
                     className="hidden"
                   />

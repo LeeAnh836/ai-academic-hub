@@ -75,6 +75,8 @@ class AIOrchestrator:
             if intent == "direct_chat" or intent == "code_help":
                 result = await self.handle_direct_chat(
                     question=question,
+                    user_id=user_id,
+                    document_ids=document_ids,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     session_history=session_history
@@ -111,13 +113,22 @@ class AIOrchestrator:
             elif intent == "homework_solver":
                 result = await self.handle_homework(
                     question=question,
+                    user_id=user_id,
+                    document_ids=document_ids,
                     temperature=temperature,
                     max_tokens=max_tokens
                 )
             
             else:
                 # Fallback to direct chat
-                result = await self.handle_direct_chat(question, temperature, max_tokens)
+                result = await self.handle_direct_chat(
+                    question=question,
+                    user_id=user_id,
+                    document_ids=document_ids,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    session_history=session_history
+                )
             
             # 3. Add metadata
             result["intent"] = intent
@@ -135,6 +146,8 @@ class AIOrchestrator:
     async def handle_direct_chat(
         self,
         question: str,
+        user_id: str,
+        document_ids: Optional[List[str]] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         session_history: Optional[List[Dict]] = None
@@ -179,11 +192,32 @@ YÊU CẦU QUAN TRỌNG:
 ✅ Cân bằng giữa tổng quan và chi tiết
 ✅ Trả lời bằng tiếng Việt, thân thiện"""
             
+            # 1. Fetch document if available
+            contexts = []
+            context_str = ""
+            if document_ids:
+                contexts = await self._retrieve_full_document(user_id, document_ids)
+                if contexts:
+                    # Limit to avoid exceeding tokens if doc is huge
+                    context_preview = contexts[:20] 
+                    context_str = "=== TÀI LIỆU CỦA NGƯỜI DÙNG ===\n"
+                    context_str += "\n\n".join([f"[{ctx['file_name']}]\n{ctx['chunk_text']}" for ctx in context_preview])
+                    context_str += "\n================================\n\n"
+            
+            # Format history
+            history_str = ""
+            if session_history:
+                recent_history = session_history[-6:]
+                history_text = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in recent_history])
+                history_str = f"LỊCH SỬ CHAT TRƯỚC ĐÓ:\n{history_text}\n\n"
+                
+            user_prompt = f"{context_str}{history_str}CÂU HỎI HIỆN TẠI:\n{question}"
+            
             # Generate answer
             answer = self.model_manager.generate_text(
                 provider_name=provider_name,
                 model_identifier=model_object,
-                prompt=question,
+                prompt=user_prompt,
                 system_instruction=system_instruction,
                 temperature=temperature or 0.7,
                 max_tokens=max_tokens or 4096  # Increased for comprehensive answers
@@ -267,25 +301,31 @@ YÊU CẦU QUAN TRỌNG:
             
             # 3. Build RAG prompt
             context_str = "\n\n".join([
-                f"[Tài liệu {i+1} - {ctx['file_name']}]\n{ctx['chunk_text']}"
+                f"[{ctx['file_name']}]\n{ctx['chunk_text']}"
                 for i, ctx in enumerate(contexts)
             ])
             
-            # System instruction
+            # System instruction with strict anti-hallucination rules
             system_instruction = """Bạn là trợ lý học tập thông minh. Trả lời câu hỏi dựa trên tài liệu được cung cấp.
+
+⛔ NGUYÊN TẮC TUYỆT ĐỐI:
+1. CHỈ trả lời dựa trên thông tin CÓ TRONG tài liệu bên dưới
+2. TUYỆT ĐỐI KHÔNG thêm kiến thức bên ngoài, KHÔNG suy luận, KHÔNG bịa đặt
+3. Nếu tài liệu KHÔNG đề cập → NÓI RÕ: "Tài liệu không đề cập đến nội dung này."
+4. Mọi câu trả lời PHẢI trích dẫn cụ thể từ tài liệu
 
 CẤU TRÚC TRẢ LỜI:
 
-1. **TÓM TẮT NGẮN GỌN** (2-3 câu)
+1. **TÓM TẮT NGẮN GỌN** (2-3 câu, trích dẫn từ tài liệu)
 
-2. **CÁC ĐIỂM CHÍNH** (Liệt kê ĐẦY ĐỦ TẤT CẢ)
+2. **CÁC ĐIỂM CHÍNH** (Liệt kê ĐẦY ĐỦ TẤT CẢ từ tài liệu)
    - Đánh số rõ ràng: 1, 2, 3, 4...
-   - Liệt kê HẾT các khái niệm/điểm quan trọng
+   - Liệt kê HẾT các khái niệm/điểm quan trọng ĐÚNG NHƯ tài liệu viết
 
 3. **GIẢI THÍCH CHI TIẾT**
-   - Giải thích TỪNG ĐIỂM đã liệt kê
-   - Trích dẫn nguồn: "Theo Tài liệu 1..."
-   - Kèm ví dụ từ tài liệu
+   - Giải thích TỪNG ĐIỂM đã liệt kê, CHỈ theo nội dung tài liệu
+   - Trích dẫn nguồn: "Theo [tên_file], ..."
+   - Kèm ví dụ từ tài liệu (nếu tài liệu có)
 
 4. **GỢI Ý KHÁM PHÁ THÊM**
    - 2-3 câu hỏi liên quan để học sâu hơn
@@ -294,13 +334,17 @@ NGUYÊN TẮC:
 ✅ Dựa CHÍNH XÁC vào nội dung tài liệu
 ✅ Liệt kê ĐẦY ĐỦ trước khi giải thích chi tiết
 ✅ Không bỏ sót điểm quan trọng nào
+✅ KHÔNG thêm kiến thức bên ngoài dù biết câu trả lời
 ✅ Nếu không có thông tin, nói rõ ràng"""
             
-            # Build user prompt
-            user_prompt = f"""TÀI LIỆU:
+            # Build user prompt with explicit grounding
+            user_prompt = f"""=== BẮT ĐẦU TÀI LIỆU (CHỈ sử dụng thông tin trong phần này) ===
 {context_str}
+=== KẾT THÚC TÀI LIỆU ===
 
 CÂU HỎI: {question}
+
+⚠️ NHẮC LẠI: Chỉ trả lời dựa trên NỘI DUNG TÀI LIỆU ở trên. KHÔNG thêm kiến thức bên ngoài.
 
 TRẢ LỜI:"""
             
@@ -310,7 +354,7 @@ TRẢ LỜI:"""
                 model_identifier=model_object,
                 prompt=user_prompt,
                 system_instruction=system_instruction,
-                temperature=temperature or settings.LLM_TEMPERATURE,
+                temperature=0.1,  # Very low for strict document faithfulness
                 max_tokens=max_tokens or 7000  # Very high for detailed RAG answers
             )
             
@@ -505,6 +549,8 @@ CÁC CÂU HỎI:"""
     async def handle_homework(
         self,
         question: str,
+        user_id: str,
+        document_ids: Optional[List[str]] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None
     ) -> Dict[str, Any]:
@@ -555,11 +601,24 @@ YÊU CẦU:
 ✅ Khuyến khích tư duy
 ✅ Bằng tiếng Việt"""
             
+            # 1. Retrieve full document context if provided
+            contexts = []
+            context_str = ""
+            if document_ids:
+                contexts = await self._retrieve_full_document(user_id, document_ids)
+                if contexts:
+                    # Limit to avoid exceeding tokens if doc is huge
+                    context_preview = contexts[:20] 
+                    context_str = "=== TÀI LIỆU BÀI TẬP (ẢNH / FILE CỦA NGƯỜI DÙNG) ===\n"
+                    context_str += "\n\n".join([f"[{ctx['file_name']}]\n{ctx['chunk_text']}" for ctx in context_preview])
+                    context_str += "\n============================================\n\n"
+
             # Build user prompt
-            user_prompt = f"""BÀI TẬP:
+            user_prompt = f"""{context_str}YÊU CẦU TỪ NGƯỜI DÙNG:
 {question}
 
-HƯỚNG DẪN:"""
+NẾU CÓ TÀI LIỆU, VUI LÒNG DỰA CHÍNH XÁC VÀO TÀI LIỆU (ẢNH/TEXT) ĐỂ GIẢI BÀI.
+HƯỚNG DẪN GIẢI CHI TIẾT:"""
             
             # Generate homework solution with fallback
             answer, used_model = self._generate_with_fallback(

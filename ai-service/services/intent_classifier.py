@@ -178,10 +178,54 @@ class IntentClassifier:
         # PHASE 1: RULE-BASED (Obvious Cases)
         # ========================================
         
-        # 1. Code Help (very obvious - contains code keywords)
-        code_indicators = ["code", "python", "java", "javascript", "function", "class", "def ", "import ", "debug", "lỗi code"]
+        # 0. Document Reference Detection (MUST be checked BEFORE code/data keywords)
+        # When user has documents AND references them, prioritize document intents
+        # This prevents "file python này" from being classified as code_help
+        doc_ref_indicators = [
+            "theo tài liệu", "trong file", "file vừa upload", "file này nói",
+            "trong tài liệu", "file này", "tài liệu này", "file đó", "tài liệu đó",
+            "file vừa", "tài liệu vừa", "file mới", "tài liệu mới",
+            "file upload", "file tải", "file đã upload", "file đã tải",
+            "nội dung file", "nội dung tài liệu",
+            "file trên", "tài liệu trên",
+            "phân tích file", "xem file", "đọc file", "review file",
+            "phân tích tài liệu", "xem tài liệu", "đọc tài liệu",
+        ]
+        has_doc_reference = any(ref in question_lower for ref in doc_ref_indicators)
+        
+        if has_doc_reference and has_documents and document_count > 0:
+            # Check if it's a summarization request about documents
+            summarization_keywords = [
+                "tóm tắt", "summarize", "summary", "tổng hợp", "tổng kết",
+                "nội dung chính", "điểm chính", "nói về gì", "bài này về",
+                "overview", "tóm lại", "tóm gọn"
+            ]
+            if any(kw in question_lower for kw in summarization_keywords):
+                print(f"✅ Intent: SUMMARIZATION (rule-based: doc ref + summarization keywords + has docs)")
+                print(f"================================================\n")
+                return "summarization"
+            
+            # Otherwise it's a RAG query about the documents
+            print(f"✅ Intent: RAG_QUERY (rule-based: doc ref + has docs)")
+            print(f"================================================\n")
+            return "rag_query"
+        
+        # 1. Code Help (only when NOT referencing uploaded documents)
+        code_indicators = ["viết code", "write code", "debug", "lỗi code", "fix code",
+                          "code mẫu", "sample code", "implement", "lập trình"]
+        # Broader code indicators - only used when NO documents are attached
+        broad_code_indicators = ["code", "python", "java", "javascript", "function",
+                                 "class", "def ", "import ", "typescript"]
+        
         if any(indicator in question_lower for indicator in code_indicators):
-            print(f"✅ Intent: CODE_HELP (rule-based: code keywords)")
+            # Explicit code-writing request → always code_help
+            print(f"✅ Intent: CODE_HELP (rule-based: explicit code keywords)")
+            print(f"================================================\n")
+            return "code_help"
+        
+        if not has_documents and any(indicator in question_lower for indicator in broad_code_indicators):
+            # Broad code keywords only trigger code_help when NO documents
+            print(f"✅ Intent: CODE_HELP (rule-based: code keywords, no docs)")
             print(f"================================================\n")
             return "code_help"
         
@@ -204,19 +248,19 @@ class IntentClassifier:
             print(f"================================================\n")
             return "direct_chat"
         
-        # 3. Explicit Document Reference WITH documents (obvious RAG)
-        explicit_doc_refs = ["theo tài liệu", "trong file", "file vừa upload", "file này nói", "trong tài liệu"]
-        if any(ref in question_lower for ref in explicit_doc_refs):
-            if has_documents and document_count > 0:
-                print(f"✅ Intent: RAG_QUERY (rule-based: explicit doc ref + has docs)")
-                print(f"================================================\n")
-                return "rag_query"
-        
-        # 4. Math Calculation (obvious - contains calculation)
+        # 3. Math Calculation (obvious - contains calculation)
         if any(op in question for op in ["+", "-", "*", "/", "×"]) and any(c.isdigit() for c in question):
             print(f"✅ Intent: HOMEWORK_SOLVER (rule-based: math operators)")
             print(f"================================================\n")
             return "homework_solver"
+        
+        # 4. If user has documents and uses broad code keywords, it's likely a RAG query
+        # about code files (e.g., "giải thích đoạn code python trong file")
+        if has_documents and document_count > 0:
+            if any(indicator in question_lower for indicator in broad_code_indicators):
+                print(f"✅ Intent: RAG_QUERY (rule-based: code keywords + has docs → query about code files)")
+                print(f"================================================\n")
+                return "rag_query"
         
         # ========================================
         # PHASE 2: LLM-BASED (Ambiguous Cases)
@@ -374,14 +418,30 @@ Intent:"""
         if any(kw in question_lower for kw in ["giải", "tính", "phương trình", "x =", "đạo hàm", "tích phân"]):
             return "homework_solver"
         
-        if any(kw in question_lower for kw in ["code", "function", "class", "debug"]):
+        # Document reference check BEFORE code keywords
+        doc_ref_keywords = [
+            "theo tài liệu", "trong file", "file này", "tài liệu này", "file trên",
+            "phân tích file", "xem file", "đọc file", "review file",
+            "file vừa", "file mới", "file đã upload", "nội dung file"
+        ]
+        if has_documents and any(kw in question_lower for kw in doc_ref_keywords):
+            if any(kw in question_lower for kw in ["tóm tắt", "summary", "nội dung chính", "tổng hợp", "nói về gì", "từng file", "mỗi file"]):
+                return "summarization"
+            return "rag_query"
+        
+        # Code keywords only when NOT referencing documents
+        if any(kw in question_lower for kw in ["viết code", "write code", "debug", "lỗi code", "fix code"]):
             return "code_help"
         
-        # Nếu có tài liệu đính kèm, chỉ dùng RAG/summarization khi có dấu hiệu tham chiếu tài liệu
+        if not has_documents and any(kw in question_lower for kw in ["code", "function", "class", "python", "java", "javascript"]):
+            return "code_help"
+        
+        # Nếu có tài liệu đính kèm
         if has_documents:
             if any(kw in question_lower for kw in ["tóm tắt", "summary", "nội dung chính", "tổng hợp", "nói về gì", "từng file", "mỗi file"]):
                 return "summarization"
-            if any(kw in question_lower for kw in ["theo tài liệu", "trong file", "file này", "tài liệu này", "file trên"]):
+            # When user has docs and uses code keywords, likely asking about code files
+            if any(kw in question_lower for kw in ["code", "function", "class", "python", "java", "javascript"]):
                 return "rag_query"
             # Có tài liệu nhưng câu hỏi chung -> vẫn trả lời trực tiếp theo kiến thức model
             return "direct_chat"

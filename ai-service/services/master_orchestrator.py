@@ -120,6 +120,26 @@ class MasterOrchestrator:
                 document_count=document_count
             )
 
+            # If user has selected/uploaded documents and asks with deictic
+            # references (e.g. "bai nay", "hinh nay", "this file"), force
+            # document-grounded routing so the model uses RAG context.
+            if self._should_force_document_grounding(
+                query=processed_query,
+                has_documents=has_documents,
+                document_count=document_count,
+            ):
+                grounded_intent = (
+                    "summarization"
+                    if self._is_summarization_query(processed_query)
+                    else "rag_query"
+                )
+                if intent != grounded_intent:
+                    logger.info(
+                        f"↪️ Override intent {intent} -> {grounded_intent} "
+                        "(document-grounded deictic query)"
+                    )
+                    intent = grounded_intent
+
             # Safety guard:
             # If no file/document context is available, force model-knowledge answer
             # for document-dependent intents to avoid "không tìm thấy file" responses.
@@ -339,6 +359,63 @@ class MasterOrchestrator:
         except Exception as e:
             logger.error(f"❌ Session clear error: {e}")
             return False
+
+    def _should_force_document_grounding(
+        self,
+        query: str,
+        has_documents: bool,
+        document_count: int,
+    ) -> bool:
+        """
+        Detect short/deictic requests that implicitly point to the currently
+        attached documents (e.g. "giai bai nay", "lam cau nay", "this image").
+        """
+        if not has_documents or document_count <= 0:
+            return False
+        if not query:
+            return False
+
+        query_lower = query.lower().strip()
+        if not query_lower:
+            return False
+
+        explicit_doc_markers = [
+            "theo tai lieu", "theo tài liệu",
+            "trong file", "trong tai lieu", "trong tài liệu",
+            "file nay", "file này", "tai lieu nay", "tài liệu này",
+            "hinh nay", "hình này", "anh nay", "ảnh này",
+            "this file", "this document", "this image", "attached file",
+        ]
+        if any(marker in query_lower for marker in explicit_doc_markers):
+            return True
+
+        deictic_markers = [
+            "này", "nay", "đó", "do", "kia", "ở trên", "o tren",
+            "vừa gửi", "vua gui", "đính kèm", "dinh kem",
+            "this", "that", "above", "attached",
+        ]
+        task_object_markers = [
+            "bài", "bai", "bài tập", "bai tap", "đề", "de",
+            "câu", "cau", "hình", "hinh", "ảnh", "anh",
+            "file", "tài liệu", "tai lieu", "document", "image",
+            "problem", "exercise", "question",
+        ]
+
+        has_deictic = any(marker in query_lower for marker in deictic_markers)
+        has_task_object = any(marker in query_lower for marker in task_object_markers)
+        short_or_medium = len(query_lower.split()) <= 18
+
+        return has_deictic and has_task_object and short_or_medium
+
+    def _is_summarization_query(self, query: str) -> bool:
+        query_lower = (query or "").lower()
+        keywords = [
+            "tóm tắt", "tom tat", "summarize", "summary",
+            "tổng hợp", "tong hop", "tổng kết", "tong ket",
+            "nội dung chính", "noi dung chinh", "overview",
+            "file nói về", "file noi ve", "tai lieu noi ve", "tài liệu nói về",
+        ]
+        return any(keyword in query_lower for keyword in keywords)
 
 
 # Global singleton

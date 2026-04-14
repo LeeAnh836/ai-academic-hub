@@ -26,24 +26,42 @@ function preprocessCitations(content: string, docMap: DocMapItem[]): string {
 
   let processed = content
 
-  for (const { file_name, document_id } of docMap) {
+  // Only use raw filename alias when it is unique to avoid wrong link mapping.
+  const rawNameCounts = new Map<string, number>()
+  for (const item of docMap) {
+    const raw = (item.raw_file_name || '').trim()
+    if (!raw) continue
+    rawNameCounts.set(raw, (rawNameCounts.get(raw) || 0) + 1)
+  }
+
+  for (const { file_name, raw_file_name, document_id } of docMap) {
     if (!file_name || !document_id) continue
 
-    // Escape special regex characters in file_name
-    const escaped = file_name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const aliases = [file_name]
+    const raw = (raw_file_name || '').trim()
+    if (raw && rawNameCounts.get(raw) === 1) {
+      aliases.push(raw)
+    }
 
-    // Match [filename] that is NOT already a markdown link
-    // i.e. not followed by (url) and not preceded by !
-    // Negative lookbehind for ! (image) and negative lookahead for (
-    const regex = new RegExp(
-      `(?<!!)\\[${escaped}\\](?!\\()`,
-      'g'
-    )
+    for (const alias of aliases) {
+      if (!alias) continue
 
-    processed = processed.replace(
-      regex,
-      `[📄 ${file_name}](/documents?preview=${document_id})`
-    )
+      // Escape special regex characters in alias
+      const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+      // Match [filename] that is NOT already a markdown link
+      // i.e. not followed by (url) and not preceded by !
+      // Negative lookbehind for ! (image) and negative lookahead for (
+      const regex = new RegExp(
+        `(?<!!)\\[${escaped}\\](?!\\()`,
+        'g'
+      )
+
+      processed = processed.replace(
+        regex,
+        `[📄 ${file_name}](/documents?preview=${document_id})`
+      )
+    }
   }
 
   return processed
@@ -254,7 +272,7 @@ export function MarkdownMessage({ content, role, docMap }: MarkdownMessageProps)
 
   // Assistant messages with markdown rendering
   return (
-    <div className="prose prose-sm max-w-none dark:prose-invert">
+    <div className="prose prose-sm max-w-none break-words min-w-0 dark:prose-invert">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}

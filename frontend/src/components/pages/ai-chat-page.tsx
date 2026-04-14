@@ -63,7 +63,67 @@ const ALLOWED_MIME = [
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'text/plain',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic'
 ]
+
+const ALLOWED_EXTS = ['.pdf', '.docx', '.txt', '.csv', '.xlsx', '.py', '.java', '.js', '.ts', '.html', '.css', '.md', '.cpp', '.jpg', '.jpeg', '.png', '.webp', '.heic']
+const IMAGE_EXT_FROM_MIME: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/heic': '.heic',
+}
+
+function looksLikeGenericImageName(name: string): boolean {
+  const stem = (name || '')
+    .replace(/\.[^.]+$/, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s*\(\d+\)$/, '')
+
+  return /^(image|img|screenshot|pasted image)([-_ ]?\d+)?$/.test(stem)
+}
+
+function normalizeIncomingFile(file: File): File {
+  const isImage = (file.type || '').startsWith('image/')
+  if (!isImage) return file
+
+  const lowerName = (file.name || '').toLowerCase()
+  const hasExt = /\.[a-z0-9]+$/.test(lowerName)
+  const ext = hasExt
+    ? lowerName.slice(lowerName.lastIndexOf('.'))
+    : (IMAGE_EXT_FROM_MIME[file.type] || '.png')
+
+  if (!looksLikeGenericImageName(lowerName)) {
+    if (hasExt) return file
+    const withExt = `${file.name}${ext}`
+    return new File([file], withExt, {
+      type: file.type || 'image/png',
+      lastModified: file.lastModified,
+    })
+  }
+
+  const now = new Date()
+  const ts = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+    String(now.getHours()).padStart(2, '0'),
+    String(now.getMinutes()).padStart(2, '0'),
+    String(now.getSeconds()).padStart(2, '0'),
+  ].join('')
+  const unique = (globalThis.crypto?.randomUUID?.() || Math.random().toString(36)).replace(/-/g, '').slice(0, 8)
+  const generatedName = `image_${ts}_${unique}${ext}`
+
+  return new File([file], generatedName, {
+    type: file.type || 'image/png',
+    lastModified: file.lastModified,
+  })
+}
 
 export function AIChatPage() {
   const [selectedChat, setSelectedChat] = useState<string | null>(null)
@@ -75,6 +135,7 @@ export function AIChatPage() {
   const [isDragging, setIsDragging] = useState(false)
   const [localMessages, setLocalMessages] = useState<LocalMessage[]>([])
   const [isSending, setIsSending] = useState(false)
+  const [metaMap, setMetaMap] = useState<Record<string, { attachedFiles?: AttachedFileInfo[], docMap?: DocMapItem[], quotaInfo?: QuotaInfo | null }>>({})
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -82,16 +143,58 @@ export function AIChatPage() {
   const dragCounterRef = useRef(0)
   const { toast } = useToast()
   const { t } = useTranslation()
-  const { sessions, loading: sessionsLoading, createSession, deleteSession } = useChatSessions()
+  const { sessions, loading: sessionsLoading, createSession, deleteSession, updateTitle } = useChatSessions()
   const { messages, loading: messagesLoading, refetch: refetchMessages } = useChatMessages(selectedChat)
   const { askInSession } = useChatAsk()
 
-  // Sync fetched messages into localMessages (only when not in the middle of sending)
+  // Sync fetched messages into localMessages
   useEffect(() => {
     if (!isSending) {
-      setLocalMessages(messages as LocalMessage[])
+      setLocalMessages((prev) => {
+        const lastPrevReal = [...prev].reverse().find(m => (!m.isOptimistic && !m.isLoading));
+
+        if (messages.length > 0) {
+            const apiSessionId = messages[0].session_id;
+            if (selectedChat && apiSessionId !== selectedChat && apiSessionId !== "draft") return prev;
+
+            if (lastPrevReal) {
+               const apiHasLatest = messages.some(m => m.id === lastPrevReal.id);
+               // Prevent downgrade if api is stale
+               if (!apiHasLatest) return prev;
+            }
+
+            return messages.map((apiMsg) => {
+              return {
+                ...(apiMsg as LocalMessage),
+                attachedFiles: metaMap[apiMsg.id]?.attachedFiles,
+                docMap: (apiMsg as any).docMap || metaMap[apiMsg.id]?.docMap,
+                quotaInfo: (apiMsg as any).quotaInfo || metaMap[apiMsg.id]?.quotaInfo,
+              }
+            })
+        }
+
+        // Keep newly sent messages while messages array is empty and refetching
+        if (messages.length === 0 && prev.length > 0) {
+            const isCurrentChat = prev[0].session_id === selectedChat || !selectedChat;
+            if (isCurrentChat) return prev;
+        }
+
+        return [];
+      })
     }
-  }, [messages, isSending])
+  }, [messages, isSending, metaMap, selectedChat])
+
+  // Clear messages immediately when switching chats
+  useEffect(() => {
+    if (selectedChat !== null) {
+      setLocalMessages(prev => {
+        if (prev.length > 0 && prev[0].session_id !== selectedChat && prev[0].session_id !== "draft") {
+          return [];
+        }
+        return prev;
+      });
+    }
+  }, [selectedChat])
 
   // Auto-scroll to bottom when local messages change
   useEffect(() => {
@@ -119,10 +222,9 @@ export function AIChatPage() {
   )
 
   const generateTitle = (msg: string): string => {
-    if (msg.length <= 50) return msg
-    const title = msg.substring(0, 50)
-    const lastSpace = title.lastIndexOf(" ")
-    return (lastSpace > 20 ? title.substring(0, lastSpace) : title) + "..."
+    const words = msg.trim().split(/\s+/);
+    if (words.length <= 10) return msg;
+    return words.slice(0, 10).join(" ") + "...";
   }
 
   // Start new chat (draft mode)
@@ -132,8 +234,10 @@ export function AIChatPage() {
     const accepted: File[] = []
     const errors: string[] = []
 
-    for (const file of files) {
-      if (!ALLOWED_MIME.includes(file.type)) {
+    for (const incomingFile of files) {
+      const file = normalizeIncomingFile(incomingFile)
+      const ext = file.name.includes('.') ? "." + file.name.split('.').pop()?.toLowerCase() : ""
+      if (!ALLOWED_MIME.includes(file.type) && !ALLOWED_EXTS.includes(ext)) {
         errors.push(t("aiChat.fileNotSupported", { name: file.name }))
         continue
       }
@@ -227,6 +331,15 @@ export function AIChatPage() {
     setIsDragging(false)
     if (e.dataTransfer.files.length > 0) {
       addFiles(e.dataTransfer.files)
+    }
+  }, [addFiles])
+
+  // ── Paste Image Handlers ───────────────────────────────────────
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+      // prevent default if there are files (so it doesn't insert file name or weird string in text area)
+      e.preventDefault();
+      addFiles(e.clipboardData.files);
     }
   }, [addFiles])
 
@@ -369,6 +482,14 @@ export function AIChatPage() {
 
       const response = await askInSession(chatId!, userMessage, askOptions)
 
+      // Set metaMap to persist file names and doc maps locally
+      const realUserFiles = currentFiles.length > 0 ? currentFiles.map((f) => ({ name: f.name, size: f.size, type: f.type })) : undefined;
+      setMetaMap(prev => ({
+        ...prev,
+        [response.user_message.id]: { attachedFiles: realUserFiles },
+        [response.ai_message.id]: { docMap: response.doc_map || [], quotaInfo: response.quota_info || null }
+      }))
+
       // Replace optimistic messages with real ones
       setLocalMessages((prev) => {
         const filtered = prev.filter(
@@ -376,7 +497,7 @@ export function AIChatPage() {
         )
         const realUser: LocalMessage = {
           ...(response.user_message as LocalMessage),
-          attachedFiles: currentFiles.map((f) => ({ name: f.name, size: f.size, type: f.type })),
+          attachedFiles: realUserFiles,
         }
         const realAi: LocalMessage = {
           ...(response.ai_message as LocalMessage),
@@ -389,6 +510,25 @@ export function AIChatPage() {
       if (isNewSession) {
         setSelectedChat(chatId)
         setIsDraftMode(false)
+        
+        // --- Tự động đặt tên lịch sử bằng câu trả lời của AI mà không tốn api LLM ---
+        try {
+          const aiResponseText = response.ai_message.content;
+          let cleanText = aiResponseText.replace(/^(dạ|vâng|chào bạn|đúng rồi|ok|oke|đây là|để|tôi sẽ|bạn có thể|chắc chắn rồi|xin chào|tất nhiên|tuyệt vời)[,\s]*/gi, '');
+          cleanText = cleanText.replace(/[#*`~>_\-]/g, '').trim();
+          const firstSegment = cleanText.split(/[:\n\.]/)[0].trim();
+          const words = firstSegment.split(' ');
+          let generatedTitle = firstSegment;
+          if (words.length > 10) {
+             generatedTitle = words.slice(0, 10).join(' ') + '...';
+          }
+          if (generatedTitle.length < 3) generatedTitle = "Trò chuyện mới";
+          
+          await updateTitle(chatId!, generatedTitle);
+        } catch(e) { 
+          // ignore title error 
+          console.error("Failed to auto-update title", e);
+        }
       } else {
         setTimeout(() => refetchMessages(), 300)
       }
@@ -501,13 +641,13 @@ export function AIChatPage() {
                         setIsDraftMode(false)
                       }}
                       className={cn(
-                        "flex w-full items-center gap-2 rounded-lg transition-colors px-3 py-2.5 text-left",
+                        "flex w-full overflow-hidden items-center gap-2 rounded-lg transition-colors px-3 py-2.5 text-left",
                         selectedChat === chat.id && !isDraftMode
                           ? "bg-accent"
                           : "hover:bg-secondary"
                       )}
                     >
-                      <p className="flex-1 truncate text-sm font-medium text-foreground">{chat.title}</p>
+                      <p className="flex-1 truncate text-sm font-medium text-foreground min-w-0">{chat.title}</p>
                     </button>
                   ))}
                 </div>
@@ -534,7 +674,7 @@ export function AIChatPage() {
             <div className="text-center">
               <Paperclip className="h-12 w-12 mx-auto mb-3 text-primary" />
               <p className="text-lg font-semibold text-primary">{t("aiChat.dropFilesHere")}</p>
-              <p className="text-sm text-muted-foreground">{t("aiChat.pdfDocxTxt")}</p>
+              <p className="text-sm text-muted-foreground">{t("aiChat.pdfDocxTxt")} + Code/CSV/Excel</p>
             </div>
           </div>
         )}
@@ -606,7 +746,7 @@ export function AIChatPage() {
                   <div className="flex items-center justify-center py-12">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
                   </div>
-                ) : (isDraftMode || localMessages.length === 0) ? (
+                ) : localMessages.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-12 text-center">
                     <img
                       src="/logo.png"
@@ -636,7 +776,7 @@ export function AIChatPage() {
                           <img src="/logo.png" alt="AI" className="h-6 w-6 object-contain" />
                         </div>
                       )}
-                      <div className={cn("flex flex-col gap-1", msg.role === "user" ? "items-end" : "w-full items-start")}>
+                      <div className={cn("flex flex-col gap-1 min-w-0 flex-1", msg.role === "user" ? "items-end" : "w-full items-start")}>
                         {/* Attached file chips – shown above the text bubble */}
                         {msg.attachedFiles && msg.attachedFiles.length > 0 && (
                           <div className="flex flex-wrap gap-1.5 max-w-[420px]">
@@ -657,7 +797,7 @@ export function AIChatPage() {
                         {/* Message bubble */}
                         <div
                           className={cn(
-                            "rounded-2xl px-4 py-3",
+                            "rounded-2xl px-4 py-3 overflow-x-auto",
                             msg.role === "user"
                               ? "max-w-[85%] border border-border bg-card text-foreground shadow-sm md:max-w-[75%]"
                               : "w-full bg-secondary/80 text-foreground"
@@ -739,7 +879,7 @@ export function AIChatPage() {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".pdf,.docx,.txt"
+                    accept=".pdf,.docx,.txt,.csv,.xlsx,.py,.java,.js,.ts,.html,.css,.md,.cpp,.jpg,.jpeg,.png,.webp,.heic"
                     multiple
                     className="hidden"
                     onChange={handleFileChange}
@@ -767,6 +907,7 @@ export function AIChatPage() {
                         handleSendMessage()
                       }
                     }}
+                    onPaste={handlePaste}
                     className="flex-1 bg-transparent border-0 shadow-none focus-visible:ring-0 min-h-[36px] max-h-[200px] resize-none p-0 py-0.5 text-sm placeholder:text-muted-foreground"
                     disabled={isSending}
                     rows={1}

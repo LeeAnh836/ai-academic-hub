@@ -112,6 +112,7 @@ export interface ContextChunk {
 
 export interface DocMapItem {
   file_name: string
+  raw_file_name?: string
   document_id: string
 }
 

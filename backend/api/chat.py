@@ -12,7 +12,8 @@ from services.chat_service import chat_service
 from schemas.chat import (
     ChatSessionResponse, ChatSessionCreateRequest, ChatMessageResponse,
     ChatMessageCreateRequest, MessageFeedbackRequest, ChatSessionDetailResponse,
-    AIUsageResponse, ChatAskRequest, ChatAskResponse, ContextChunkResponse
+    AIUsageResponse, ChatAskRequest, ChatAskResponse, ContextChunkResponse,
+    ChatSessionUpdateTitleRequest
 )
 from models.users import User
 from models.chat import ChatSession, ChatMessage, MessageFeedback, AIUsageHistory
@@ -115,6 +116,27 @@ async def get_chat_session(
     )
     
     return session
+
+
+# ============================================
+# Update session title
+# ============================================
+@router.patch("/sessions/{session_id}/title", response_model=ChatSessionResponse)
+async def update_chat_session_title(
+    session_id: UUID,
+    request: ChatSessionUpdateTitleRequest,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db)
+):
+    """
+    Cập nhật tiêu đề chat session
+    """
+    return chat_service.update_chat_session_title(
+        session_id=session_id,
+        user_id=str(current_user.id),
+        title=request.title,
+        db=db
+    )
 
 
 # ============================================
@@ -393,7 +415,7 @@ async def ask_in_chat_session(
             ai_request["max_tokens"] = request.max_tokens
         
         # Call AI Service with timeout
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             ai_response = await client.post(
                 ai_service_url,
                 json=ai_request
@@ -493,6 +515,3 @@ async def ask_in_chat_session(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process chat request: {str(e)}"
         )
-    
-    db.delete(session)
-    db.commit()

@@ -4,8 +4,11 @@ Document routes - CRUD operations
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
+from datetime import datetime
 import hashlib
+import os
+import re
 
 from core.databases import get_db
 from api.dependencies import get_current_user, CurrentUser
@@ -23,6 +26,42 @@ router = APIRouter(
     tags=["documents"],
     dependencies=[Depends(get_current_user)]  # Apply authentication to all endpoints
 )
+
+
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".gif"}
+IMAGE_MIME_TO_EXT = {
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/heic": ".heic",
+    "image/gif": ".gif",
+}
+
+
+def _looks_like_generic_image_name(stem: str) -> bool:
+    normalized = re.sub(r"\s+", " ", (stem or "").strip().lower())
+    normalized = re.sub(r"\s*\(\d+\)$", "", normalized)
+    return bool(re.match(r"^(image|img|screenshot|pasted image)([-_ ]?\d+)?$", normalized))
+
+
+def _normalize_upload_filename(file_name: Optional[str], content_type: Optional[str]) -> str:
+    raw_name = os.path.basename((file_name or "").strip()) or "upload"
+    stem, ext = os.path.splitext(raw_name)
+    ext = ext.lower()
+
+    inferred_ext = IMAGE_MIME_TO_EXT.get((content_type or "").lower(), "")
+    if not ext and inferred_ext:
+        ext = inferred_ext
+
+    is_image = ((content_type or "").lower().startswith("image/") or ext in IMAGE_EXTENSIONS)
+    if is_image and _looks_like_generic_image_name(stem):
+        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        short_id = uuid4().hex[:8]
+        final_ext = ext or inferred_ext or ".png"
+        return f"image_{ts}_{short_id}{final_ext}"
+
+    return raw_name if ext else f"{raw_name}{inferred_ext}"
 
 
 # ============================================
@@ -136,13 +175,30 @@ async def upload_document(
     allowed_types = [
         "application/pdf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "text/plain"
+        "text/plain",
+        "text/csv",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "text/html",
+        "text/javascript",
+        "text/x-python",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/heic",
+        "image/jpg"
     ]
     
-    if file.content_type not in allowed_types:
+    normalized_file_name = _normalize_upload_filename(file.filename, file.content_type)
+    ext = os.path.splitext(normalized_file_name)[1].lower()
+    is_image_upload = ((file.content_type or "").startswith("image/") or ext in IMAGE_EXTENSIONS)
+
+    allowed_exts = ['.pdf', '.docx', '.txt', '.csv', '.xlsx', '.py', '.java', '.js', '.ts', '.html', '.css', '.md', '.cpp', '.jpg', '.jpeg', '.png', '.webp', '.heic']
+    
+    if file.content_type not in allowed_types and ext not in allowed_exts:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File type {file.content_type} not supported. Allowed: PDF, DOCX, TXT"
+            detail=f"File type {file.content_type} (ext {ext}) not supported. Allowed: PDF, DOCX, TXT, CSV, Code, Tables"
         )
 
     # Validate file size (max 20 MB)
@@ -169,10 +225,14 @@ async def upload_document(
                 detected_category = "document"
             elif file.content_type == "text/plain":
                 # Try to detect from extension
-                if file.filename.endswith(('.py', '.js', '.java', '.cpp', '.c', '.go', '.rs')):
+                if normalized_file_name.endswith(('.py', '.js', '.java', '.cpp', '.c', '.go', '.rs')):
                     detected_category = "code"
                 else:
                     detected_category = "text"
+            elif file.content_type and file.content_type.startswith("image/"):
+                detected_category = "image"
+            elif ext in ['.jpg', '.jpeg', '.png', '.webp', '.heic']:
+                detected_category = "image"
             else:
                 detected_category = "general"
         
@@ -186,19 +246,23 @@ async def upload_document(
 
         # 4. Dedup lookup within the same user: if same hash already processed,
         # reuse canonical vectors/chunks and skip re-embedding.
-        existing_processed = db.query(Document).filter(
-            Document.user_id == current_user.id,
-            Document.content_hash == content_hash,
-            Document.is_processed == True,
-            Document.processing_status == "completed"
-        ).order_by(Document.created_at.asc()).first()
+        # NOTE: images are intentionally processed separately so each upload
+        # has its own document_id/source identity for citations.
+        existing_processed = None
+        if not is_image_upload:
+            existing_processed = db.query(Document).filter(
+                Document.user_id == current_user.id,
+                Document.content_hash == content_hash,
+                Document.is_processed == True,
+                Document.processing_status == "completed"
+            ).order_by(Document.created_at.asc()).first()
 
         if existing_processed:
             canonical_id = existing_processed.canonical_document_id or existing_processed.id
             dedup_document = Document(
                 user_id=current_user.id,
-                title=title or file.filename,
-                file_name=file.filename,
+                title=title or normalized_file_name,
+                file_name=normalized_file_name,
                 # Reuse physical object to avoid duplicate MinIO storage.
                 file_path=existing_processed.file_path,
                 content_hash=content_hash,
@@ -218,7 +282,7 @@ async def upload_document(
         # 5. Upload new file to MinIO (no dedup match)
         upload_result = minio_service.upload_file(
             file_data=file_data,
-            file_name=file.filename,
+            file_name=normalized_file_name,
             content_type=file.content_type,
             user_id=str(current_user.id)
         )
@@ -226,8 +290,8 @@ async def upload_document(
         # 6. Create document record in PostgreSQL
         new_document = Document(
             user_id=current_user.id,
-            title=title or file.filename,  # Auto-use filename if no title
-            file_name=file.filename,
+            title=title or normalized_file_name,  # Auto-use filename if no title
+            file_name=normalized_file_name,
             file_path=upload_result["file_path"],
             content_hash=content_hash,
             file_size=upload_result["size"],

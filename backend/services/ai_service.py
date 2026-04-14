@@ -20,7 +20,7 @@ class AIService:
     def __init__(self):
         """Initialize AI Service URL"""
         self.ai_service_url = getattr(settings, 'AI_SERVICE_URL', 'http://ai-service:8001')
-        self.timeout = 120.0  # 2 minutes timeout for processing
+        self.timeout = 600.0  # 10 minutes timeout for image/OCR processing
     
     async def generate_embeddings(
         self,
