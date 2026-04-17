@@ -166,7 +166,7 @@ export function AIChatPage() {
             return messages.map((apiMsg) => {
               return {
                 ...(apiMsg as LocalMessage),
-                attachedFiles: metaMap[apiMsg.id]?.attachedFiles,
+                attachedFiles: (apiMsg as any).attachedFiles || metaMap[apiMsg.id]?.attachedFiles,
                 docMap: (apiMsg as any).docMap || metaMap[apiMsg.id]?.docMap,
                 quotaInfo: (apiMsg as any).quotaInfo || metaMap[apiMsg.id]?.quotaInfo,
               }
@@ -556,11 +556,11 @@ export function AIChatPage() {
 
   // ── Render ─────────────────────────────────────────────────────
   return (
-    <div className="flex h-[calc(100vh-56px)] md:h-screen">
+    <div className="flex h-[calc(100vh-56px)] min-w-0 md:h-screen">
       {/* ── Conversation List ── */}
       <div
         className={cn(
-          "flex flex-col border-r border-border bg-card transition-all duration-300",
+          "flex shrink-0 flex-col border-r border-border bg-card transition-all duration-300",
           historyCollapsed ? "w-0 md:w-[68px] overflow-hidden" : "w-full md:w-[300px] lg:w-[320px]",
           selectedChat && "hidden md:flex"
         )}
@@ -660,7 +660,7 @@ export function AIChatPage() {
       {/* ── Chat Area ── */}
       <div
         className={cn(
-          "flex flex-1 flex-col bg-background relative",
+          "relative flex min-w-0 flex-1 flex-col bg-background",
           !selectedChat && !isDraftMode && "hidden md:flex"
         )}
         onDragEnter={handleDragEnter}
@@ -741,7 +741,7 @@ export function AIChatPage() {
 
             {/* Messages */}
             <ScrollArea className="flex-1 px-2 py-4 sm:px-4 md:px-6 lg:px-8">
-              <div className="w-full space-y-6">
+              <div className="mx-auto w-full min-w-0 max-w-6xl space-y-6">
                 {messagesLoading && !isDraftMode && localMessages.length === 0 ? (
                   <div className="flex items-center justify-center py-12">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -776,7 +776,7 @@ export function AIChatPage() {
                           <img src="/logo.png" alt="AI" className="h-6 w-6 object-contain" />
                         </div>
                       )}
-                      <div className={cn("flex flex-col gap-1 min-w-0 flex-1", msg.role === "user" ? "items-end" : "w-full items-start")}>
+                      <div className={cn("flex flex-1 min-w-0 flex-col gap-1", msg.role === "user" ? "items-end" : "w-full items-start")}>
                         {/* Attached file chips – shown above the text bubble */}
                         {msg.attachedFiles && msg.attachedFiles.length > 0 && (
                           <div className="flex flex-wrap gap-1.5 max-w-[420px]">
@@ -797,7 +797,7 @@ export function AIChatPage() {
                         {/* Message bubble */}
                         <div
                           className={cn(
-                            "rounded-2xl px-4 py-3 overflow-x-auto",
+                            "min-w-0 max-w-full overflow-hidden rounded-2xl px-4 py-3",
                             msg.role === "user"
                               ? "max-w-[85%] border border-border bg-card text-foreground shadow-sm md:max-w-[75%]"
                               : "w-full bg-secondary/80 text-foreground"

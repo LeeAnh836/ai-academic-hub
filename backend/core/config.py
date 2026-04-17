@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     
     # AI Service URL (Microservice)
     AI_SERVICE_URL: str = "http://ai-service:8001"
+
+    # MongoDB Settings (Chat History Source of Truth)
+    ENABLE_MONGO_CHAT_HISTORY: bool = True
+    MONGODB_URI: str = "mongodb://mongo:27017"
+    MONGODB_DB_NAME: str = "jvb_chat"
     
     def get_cors_origins(self) -> list[str]:
         """Convert CORS_ORIGINS string to list"""

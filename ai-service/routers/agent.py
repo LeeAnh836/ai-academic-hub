@@ -29,6 +29,11 @@ class AgentQueryRequest(BaseModel):
     top_k: Optional[int] = 5
     score_threshold: Optional[float] = 0.5
     chat_history: Optional[List[dict]] = None
+    conversation_summary: Optional[str] = None
+    source_ids: Optional[List[str]] = None
+    source_metadata: Optional[List[dict]] = None
+    trace_id: Optional[str] = None
+    persisted_by_backend: Optional[bool] = False
 
 
 class AgentQueryResponse(BaseModel):
@@ -104,7 +109,12 @@ async def agent_query(request: AgentQueryRequest):
             "document_ids": request.document_ids or [],
             "top_k": request.top_k,
             "score_threshold": request.score_threshold,
-            "chat_history": request.chat_history or []
+            "chat_history": request.chat_history or [],
+            "conversation_summary": request.conversation_summary,
+            "source_ids": request.source_ids or [],
+            "source_metadata": request.source_metadata or [],
+            "trace_id": request.trace_id,
+            "persisted_by_backend": bool(request.persisted_by_backend),
         }
         
         # Process query

@@ -117,12 +117,16 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 200
     
-    # Redis Settings (Memory Management)
+    # MongoDB Settings (Conversation Memory)
+    MONGODB_URI: str = "mongodb://mongo:27017"
+    MONGODB_DB_NAME: str = "jvb_chat"
+    MEMORY_TTL: int = 3600  # used for optional ephemeral context cleanups
+
+    # Redis Settings (LLM cache only)
     REDIS_HOST: str = "redis"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
     REDIS_PASSWORD: Optional[str] = None
-    MEMORY_TTL: int = 3600  # 1 hour session timeout
     
     # Multi-Agent Settings
     ENABLE_MULTI_AGENT: bool = True

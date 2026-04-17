@@ -246,8 +246,8 @@ class GeneralQAAgent(BaseAgent):
         if not chat_history:
             return ""
         
-        # Take last 10 messages (5 turns) for context
-        recent = chat_history[-10:]
+        # Take last 12 messages (6 turns) for context
+        recent = chat_history[-12:]
         
         if not recent:
             return ""

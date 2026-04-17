@@ -226,7 +226,7 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
   }
 
   return (
-    <div className="mb-4 overflow-hidden rounded-xl border border-border bg-muted/70 text-foreground shadow-sm">
+    <div className="mb-4 w-full max-w-full overflow-hidden rounded-xl border border-border bg-muted/70 text-foreground shadow-sm">
       <div className="flex items-center justify-between border-b border-border/80 bg-muted/90 px-3 py-2">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-foreground/80">
           {language || 'code'}
@@ -241,7 +241,7 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <pre className="overflow-x-auto bg-background/55 p-3 text-xs leading-6">
+      <pre className="max-w-full overflow-x-auto bg-background/55 p-3 text-xs leading-6">
         <code className="font-mono">{code}</code>
       </pre>
     </div>
@@ -272,7 +272,7 @@ export function MarkdownMessage({ content, role, docMap }: MarkdownMessageProps)
 
   // Assistant messages with markdown rendering
   return (
-    <div className="prose prose-sm max-w-none break-words min-w-0 dark:prose-invert">
+    <div className="prose prose-sm min-w-0 max-w-none overflow-hidden break-words dark:prose-invert [&_.katex-display]:max-w-full [&_.katex-display]:overflow-x-auto [&_a]:break-all [&_code]:break-all [&_code]:whitespace-pre-wrap [&_li]:break-words [&_p]:break-words [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:max-w-full">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
@@ -293,7 +293,7 @@ export function MarkdownMessage({ content, role, docMap }: MarkdownMessageProps)
 
           // Paragraphs
           p: ({ node, ...props }) => (
-            <p className="mb-3 text-sm leading-relaxed text-foreground" {...props} />
+            <p className="mb-3 break-words text-sm leading-relaxed text-foreground" {...props} />
           ),
 
           // Lists
@@ -304,7 +304,7 @@ export function MarkdownMessage({ content, role, docMap }: MarkdownMessageProps)
             <ol className="list-decimal list-inside mb-3 space-y-1 text-sm text-foreground" {...props} />
           ),
           li: ({ node, ...props }) => (
-            <li className="ml-2 text-foreground" {...props} />
+            <li className="ml-2 break-words text-foreground" {...props} />
           ),
 
           // Strong/Bold
@@ -320,7 +320,7 @@ export function MarkdownMessage({ content, role, docMap }: MarkdownMessageProps)
           // Inline code only; block code is handled by `pre`.
           code: ({ node, children, ...props }: any) => (
             <code
-              className="rounded bg-muted/80 px-1.5 py-0.5 text-xs font-mono text-foreground"
+              className="break-all whitespace-pre-wrap rounded bg-muted/80 px-1.5 py-0.5 text-xs font-mono text-foreground"
               {...props}
             >
               {children}
@@ -341,7 +341,7 @@ export function MarkdownMessage({ content, role, docMap }: MarkdownMessageProps)
             }
 
             return (
-              <pre className="overflow-x-auto rounded-md border border-border bg-muted/60 p-3 text-xs leading-6 text-foreground">
+              <pre className="max-w-full overflow-x-auto rounded-md border border-border bg-muted/60 p-3 text-xs leading-6 text-foreground">
                 {children}
               </pre>
             )
@@ -368,8 +368,8 @@ export function MarkdownMessage({ content, role, docMap }: MarkdownMessageProps)
                 className={cn(
                   "font-medium cursor-pointer",
                   isDocLink
-                    ? "text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5"
-                    : "text-primary hover:underline"
+                    ? "inline-flex items-center gap-0.5 break-all text-blue-600 hover:underline dark:text-blue-400"
+                    : "break-all text-primary hover:underline"
                 )}
                 href={isDocLink ? undefined : href}
                 target={isDocLink ? undefined : "_blank"}
@@ -388,7 +388,7 @@ export function MarkdownMessage({ content, role, docMap }: MarkdownMessageProps)
 
           // Tables
           table: ({ node, ...props }) => (
-            <div className="overflow-x-auto mb-3">
+            <div className="mb-3 max-w-full overflow-x-auto">
               <table className="min-w-full border border-border text-sm" {...props} />
             </div>
           ),

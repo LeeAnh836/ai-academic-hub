@@ -2,7 +2,13 @@
 // Chat Service
 // ============================================
 import { api } from './api'
-import type { ChatSession, ChatMessage, ChatAskResponse } from '@/types/api'
+import type {
+  ChatSession,
+  ChatMessage,
+  ChatAskResponse,
+  ChatTimelineResponse,
+  AttachedFileInfo,
+} from '@/types/api'
 
 export interface CreateChatSessionParams {
   title: string
@@ -44,9 +50,31 @@ export const chatService = {
     skip = 0,
     limit = 50
   ): Promise<ChatMessage[]> => {
-    return api.get<ChatMessage[]>(
-      `/api/chat/sessions/${sessionId}/messages?skip=${skip}&limit=${limit}`
-    )
+    try {
+      const timeline = await api.get<ChatTimelineResponse>(
+        `/api/chat/sessions/${sessionId}/timeline?skip=${skip}&limit=${limit}`
+      )
+
+      return (timeline.messages || []).map((item) => {
+        const attachedFiles: AttachedFileInfo[] = (item.attached_files || []).map((file) => ({
+          document_id: file.document_id,
+          name: file.name,
+          size: Number(file.size || 0),
+          type: file.type || '',
+        }))
+
+        return {
+          ...item.message,
+          attachedFiles,
+          docMap: item.doc_map || [],
+        }
+      })
+    } catch {
+      // Compatibility fallback when timeline endpoint is unavailable.
+      return api.get<ChatMessage[]>(
+        `/api/chat/sessions/${sessionId}/messages?skip=${skip}&limit=${limit}`
+      )
+    }
   },
 
   // Send message

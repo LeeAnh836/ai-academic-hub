@@ -98,6 +98,38 @@ export interface ChatMessage {
   total_tokens: number
   confidence_score: number | null
   created_at: string
+  attachedFiles?: AttachedFileInfo[]
+  docMap?: DocMapItem[]
+  quotaInfo?: QuotaInfo | null
+}
+
+export interface AttachedFileInfo {
+  document_id?: string
+  name: string
+  size: number
+  type: string
+}
+
+export interface ChatSourceRef {
+  source_id: string
+  ref_type: string
+  confidence?: number
+  chunk_ids?: string[]
+  trace_id?: string | null
+  created_at?: string
+}
+
+export interface ChatTimelineMessageItem {
+  message: ChatMessage
+  source_refs: ChatSourceRef[]
+  attached_files?: AttachedFileInfo[]
+  doc_map?: DocMapItem[]
+}
+
+export interface ChatTimelineResponse {
+  session_id: string
+  source_catalog?: Record<string, any>
+  messages: ChatTimelineMessageItem[]
 }
 
 export interface ContextChunk {

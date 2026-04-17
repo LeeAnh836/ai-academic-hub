@@ -24,6 +24,23 @@ services:
     networks:
       - jvb_network_prod
 
+  # MongoDB (Chat History Source of Truth)
+  mongo:
+    image: mongo:7
+    container_name: jvb_mongo_prod
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data_prod:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - jvb_network_prod
+
   # Redis Cache & Blacklist
   redis:
     image: redis:7-alpine
@@ -64,6 +81,8 @@ services:
         condition: service_started
       qdrant:
         condition: service_started
+      mongo:
+        condition: service_healthy
       ai-service:
         condition: service_started
     networks:
@@ -83,6 +102,10 @@ services:
     depends_on:
       qdrant:
         condition: service_started
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
     networks:
       - jvb_network_prod
 
@@ -153,6 +176,7 @@ services:
 volumes:
   postgres_data_prod:
   redis_data_prod:
+  mongo_data_prod:
   minio_data_prod:
   qdrant_data_prod:
 

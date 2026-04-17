@@ -10,6 +10,8 @@ from core.databases import init_db, close_db
 from core.redis import redis_blacklist
 from core.minio import minio_client
 from core.qdrant import qdrant_client
+from core.mongo import mongo_chat_client
+from services.chat_history_service import chat_history_service
 from services.token_service import token_service
 from services.user_presence import user_presence
 from api.auth import router as auth_router
@@ -36,11 +38,16 @@ async def lifespan(app: FastAPI):
     await user_presence.connect()
     await minio_client.connect()
     await qdrant_client.connect()
+    await mongo_chat_client.connect()
+    if mongo_chat_client.enabled:
+        chat_history_service.ensure_indexes()
     print("✅ Database initialized")
     print("✅ Redis blacklist connected")
     print("✅ User presence tracker connected")
     print("✅ MinIO connected")
     print("✅ Qdrant connected")
+    if mongo_chat_client.enabled:
+        print("✅ Mongo chat history connected")
     
     yield
     
@@ -50,6 +57,7 @@ async def lifespan(app: FastAPI):
     await redis_blacklist.disconnect()
     await minio_client.disconnect()
     await qdrant_client.disconnect()
+    await mongo_chat_client.disconnect()
     await close_db()
     print("✅ Resources cleaned up")
 

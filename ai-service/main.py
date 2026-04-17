@@ -54,15 +54,15 @@ async def lifespan(app: FastAPI):
             print(f"⚠️ Neo4j connection failed: {e}")
             print("💡 GraphRAG will be disabled. Vector RAG will still work.")
     
-    # Connect to Redis (Memory Manager)
+    # Connect to MongoDB (Conversation Memory Manager)
     if settings.ENABLE_MULTI_AGENT:
-        print("💾 Connecting to Redis Memory...")
+        print("💾 Connecting to Mongo Conversation Memory...")
         memory_manager.connect()
         
         if memory_manager.enabled:
-            print("✅ Redis Memory Manager ready")
+            print("✅ Mongo Conversation Memory ready")
         else:
-            print("⚠️ Redis unavailable - Memory features disabled")
+            print("⚠️ Mongo unavailable - Memory features disabled")
 
     # Connect LLM Cache (Redis + memory fallback)
     if settings.ENABLE_LLM_CACHE:

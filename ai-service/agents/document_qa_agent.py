@@ -61,6 +61,8 @@ class DocumentQAAgent(BaseAgent):
             top_k = int(context.get("top_k") or settings.RAG_TOP_K)
             score_threshold = float(context.get("score_threshold") or settings.RAG_SCORE_THRESHOLD)
             chat_history = context.get("chat_history", [])
+            conversation_summary = context.get("conversation_summary")
+            source_metadata = context.get("source_metadata", [])
             intent = context.get("intent", "")
             
             # Validate that documents are provided
@@ -131,7 +133,14 @@ class DocumentQAAgent(BaseAgent):
                 }
             
             # Generate answer from contexts
-            answer = await self._generate_answer(query, contexts, complexity, chat_history)
+            answer = await self._generate_answer(
+                query=query,
+                contexts=contexts,
+                complexity=complexity,
+                chat_history=chat_history,
+                conversation_summary=conversation_summary,
+                source_metadata=source_metadata,
+            )
             
             # Save state
             self.save_state(user_id, session_id, {
@@ -407,7 +416,9 @@ class DocumentQAAgent(BaseAgent):
         query: str,
         contexts: List[Dict[str, Any]],
         complexity: str = "moderate",
-        chat_history: Optional[List[Dict[str, Any]]] = None
+        chat_history: Optional[List[Dict[str, Any]]] = None,
+        conversation_summary: Optional[str] = None,
+        source_metadata: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """
         Generate answer from contexts using LLM.
@@ -439,8 +450,10 @@ class DocumentQAAgent(BaseAgent):
                     for i, ctx in enumerate(contexts)
                 ])
             
-            # Build chat history section (last 6 messages = 3 turns)
+            # Build chat history section (last 12 messages = 6 turns)
             history_section = self._build_history_section(chat_history)
+            summary_section = self._build_summary_section(conversation_summary)
+            source_meta_section = self._build_source_metadata_section(source_metadata)
             
             # Detect request type: creative vs analytical
             request_type = self._detect_request_type(query)
@@ -452,6 +465,8 @@ class DocumentQAAgent(BaseAgent):
             user_prompt = f"""=== BẮT ĐẦU TÀI LIỆU (CHỈ sử dụng thông tin trong phần này) ===
 {context_str}
 === KẾT THÚC TÀI LIỆU ===
+{summary_section}
+{source_meta_section}
 {history_section}
 CÂU HỎI: {query}
 
@@ -553,7 +568,8 @@ TRẢ LỜI:"""
         """Build chat history section string for prompt."""
         if not chat_history:
             return ""
-        recent = chat_history[-10:]
+        # Keep 6 turns = 12 messages in the active prompt window.
+        recent = chat_history[-12:]
         lines = []
         for msg in recent:
             role = "Người dùng" if msg.get("role") == "user" else "Trợ lý"
@@ -563,6 +579,37 @@ TRẢ LỜI:"""
                 content = content[:1000] + "\n...[truncated]"
             lines.append(f"{role}: {content}")
         return "\nLỊCH SỬ TRÒ CHUYỆN GẦN ĐÂY:\n" + "\n".join(lines) + "\n"
+
+    def _build_summary_section(self, conversation_summary: Optional[str]) -> str:
+        if not conversation_summary:
+            return ""
+        text = conversation_summary.strip()
+        if not text:
+            return ""
+        if len(text) > 3000:
+            text = text[:3000] + "\n...[truncated]"
+        return f"\nTÓM TẮT HỘI THOẠI TRƯỚC ĐÓ:\n{text}\n"
+
+    def _build_source_metadata_section(
+        self,
+        source_metadata: Optional[List[Dict[str, Any]]],
+    ) -> str:
+        if not source_metadata:
+            return ""
+
+        lines = []
+        for source in source_metadata[:10]:
+            source_id = source.get("source_id") or "unknown"
+            file_name = source.get("file_name") or (source.get("metadata") or {}).get("title") or source_id
+            mime_type = source.get("mime_type") or "unknown"
+            tags = (source.get("metadata") or {}).get("tags") or []
+            tag_text = ", ".join(tags[:5]) if tags else "none"
+            lines.append(f"- {file_name} | source_id={source_id} | mime={mime_type} | tags={tag_text}")
+
+        if not lines:
+            return ""
+
+        return "\nMETADATA NGUỒN TRI THỨC ĐANG LIÊN QUAN:\n" + "\n".join(lines) + "\n"
 
     # =========================================================================
     # Map-Reduce Pipeline for Multi-Document Queries
