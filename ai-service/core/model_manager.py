@@ -39,6 +39,8 @@ class ModelManager:
         self.gemini_api_keys = []
         self.current_gemini_key_idx = -1
         self.gemini_keys_status = {}
+        self.gemini_invalid_keys = set()
+        self.gemini_model_status = {}
         
         # Google Gemini (REST API)
         if settings.GOOGLE_API_KEY:
@@ -93,9 +95,13 @@ class ModelManager:
             if forced == "groq" and self._provider_available("groq"):
                 return ("groq-llama", settings.GROQ_LLAMA_MODEL)
             if forced == "gemini" and self._provider_available("gemini"):
+                use_pro = (
+                    complexity == "high"
+                    and self._is_gemini_model_available(settings.GEMINI_PRO_MODEL)
+                )
                 return (
-                    "gemini-pro" if complexity == "high" else "gemini-flash",
-                    settings.GEMINI_PRO_MODEL if complexity == "high" else settings.GEMINI_FLASH_MODEL,
+                    "gemini-pro" if use_pro else "gemini-flash",
+                    settings.GEMINI_PRO_MODEL if use_pro else settings.GEMINI_FLASH_MODEL,
                 )
             if forced == "mistral" and self._provider_available("mistral"):
                 return ("mistral", settings.MISTRAL_MODEL)
@@ -184,9 +190,17 @@ class ModelManager:
         key = (model_key or "").lower()
         if key == "groq" and self._provider_available("groq"):
             return ("groq-llama", settings.GROQ_LLAMA_MODEL)
-        if key == "gemini_flash" and self._provider_available("gemini"):
+        if (
+            key == "gemini_flash"
+            and self._provider_available("gemini")
+            and self._is_gemini_model_available(settings.GEMINI_FLASH_MODEL)
+        ):
             return ("gemini-flash", settings.GEMINI_FLASH_MODEL)
-        if key == "gemini_pro" and self._provider_available("gemini"):
+        if (
+            key == "gemini_pro"
+            and self._provider_available("gemini")
+            and self._is_gemini_model_available(settings.GEMINI_PRO_MODEL)
+        ):
             return ("gemini-pro", settings.GEMINI_PRO_MODEL)
         if key == "mistral" and self._provider_available("mistral"):
             return ("mistral", settings.MISTRAL_MODEL)
@@ -252,27 +266,6 @@ class ModelManager:
         except Exception as e:
             error_str = str(e)
             logger.error(f"❌ Generation failed ({provider_name}): {e}")
-
-            # Mark Gemini as temporarily rate-limited on quota/429 errors.
-            if "gemini" in provider_name and self._is_rate_limit_error(error_str):
-                self._gemini_rate_limited = True
-                self._gemini_rate_limited_until = self._estimate_reset_time(daily=False)
-            if "openai" in provider_name and self._is_rate_limit_error(error_str):
-                self._openai_rate_limited = True
-                self._openai_rate_limited_until = self._estimate_reset_time(daily=False)
-            if "claude" in provider_name and self._is_rate_limit_error(error_str):
-                self._anthropic_rate_limited = True
-                self._anthropic_rate_limited_until = self._estimate_reset_time(daily=False)
-            if "mistral" in provider_name and self._is_rate_limit_error(error_str):
-                self._mistral_rate_limited = True
-                self._mistral_rate_limited_until = self._estimate_reset_time(daily=False)
-            
-            # If Groq itself is the primary and hits 429, flag it and try Gemini fallback
-            if "groq" in provider_name and ("429" in error_str or "rate_limit_exceeded" in error_str):
-                self._groq_rate_limited = True
-                self._groq_rate_limited_until = self._estimate_reset_time(daily=True)
-                logger.error("❌ Groq TPD 429 while using Groq as primary — flagging as exhausted")
-                logger.warning("⚠️ Groq 429 detected, deferring to normal fallback chain")
             
             # Multi-provider fallback chain
             if enable_fallback:
@@ -292,14 +285,27 @@ class ModelManager:
                         )
                     except Exception as fallback_error:
                         fb_err = str(fallback_error)
-                        if "groq" in fb_provider and self._is_rate_limit_error(fb_err):
-                            self._groq_rate_limited = True
-                            self._groq_rate_limited_until = self._estimate_reset_time(daily=True)
+                        self._mark_provider_rate_limited(
+                            provider_name=fb_provider,
+                            model_identifier=fb_model,
+                            error_str=fb_err,
+                        )
                         logger.error(f"❌ Fallback failed ({fb_provider}): {fallback_error}")
+                self._mark_provider_rate_limited(
+                    provider_name=provider_name,
+                    model_identifier=model_identifier,
+                    error_str=error_str,
+                )
                 raise Exception(
                     f"Tat ca provider deu that bai. Primary: {error_str}. "
                     "Vui long thu lai sau khi quota duoc reset."
                 )
+
+            self._mark_provider_rate_limited(
+                provider_name=provider_name,
+                model_identifier=model_identifier,
+                error_str=error_str,
+            )
             
             raise
             
@@ -385,10 +391,15 @@ class ModelManager:
             except httpx.HTTPStatusError as e:
                 body_preview = response.text[:600] if response.text else ""
                 error_msg = f"Gemini Vision API {response.status_code}: {body_preview}"
-                if self._is_rate_limit_error(error_msg):
-                    logger.warning(f"⚠️ Gemini Key {masked_key} hit rate limit (Vision). Rotating...")
-                    if hasattr(self, 'gemini_keys_status'):
-                        self.gemini_keys_status[api_key] = self._estimate_reset_time(daily=False)
+
+                should_rotate = self._handle_gemini_http_error(
+                    api_key=api_key,
+                    status_code=response.status_code,
+                    error_msg=error_msg,
+                    model_identifier=model_identifier,
+                    context="vision",
+                )
+                if should_rotate:
                     last_exception = Exception(error_msg)
                     continue
                 else:
@@ -417,7 +428,11 @@ class ModelManager:
     def _provider_available(self, provider: str) -> bool:
         provider = provider.lower()
         if provider == "gemini":
-            return bool(self.gemini_api_key and settings.ENABLE_GEMINI and not self._gemini_rate_limited)
+            return bool(
+                self._has_active_gemini_key()
+                and settings.ENABLE_GEMINI
+                and not self._gemini_rate_limited
+            )
         if provider == "groq":
             return bool(self.groq_client and settings.ENABLE_GROQ and not self._groq_rate_limited)
         if provider == "mistral":
@@ -428,8 +443,54 @@ class ModelManager:
             return bool(self.anthropic_api_key and settings.ENABLE_ANTHROPIC and not self._anthropic_rate_limited)
         return False
 
+    def _has_active_gemini_key(self) -> bool:
+        if getattr(self, "gemini_api_keys", None):
+            return any(k not in self.gemini_invalid_keys for k in self.gemini_api_keys)
+        return bool(self.gemini_api_key and self.gemini_api_key not in self.gemini_invalid_keys)
+
+    def _is_gemini_model_available(self, model_identifier: Optional[str]) -> bool:
+        model = (model_identifier or "").strip()
+        if not model:
+            return True
+
+        blocked_until = self.gemini_model_status.get(model)
+        if not blocked_until:
+            return True
+
+        try:
+            if datetime.fromisoformat(blocked_until) > datetime.now(timezone.utc):
+                return False
+        except Exception:
+            pass
+
+        self.gemini_model_status.pop(model, None)
+        return True
+
+    def _mark_gemini_model_cooldown(
+        self,
+        model_identifier: Optional[str],
+        *,
+        daily: bool,
+        minutes: int = 30,
+    ):
+        model = (model_identifier or "").strip()
+        if not model:
+            return
+
+        self.gemini_model_status[model] = self._estimate_reset_time(
+            daily=daily,
+            minutes=minutes,
+        )
+
     def _refresh_rate_limit_flags(self):
         now = datetime.now(timezone.utc)
+
+        for model_name, blocked_until in list(self.gemini_model_status.items()):
+            try:
+                if datetime.fromisoformat(blocked_until) <= now:
+                    self.gemini_model_status.pop(model_name, None)
+            except Exception:
+                self.gemini_model_status.pop(model_name, None)
 
         if self._gemini_rate_limited and self._gemini_rate_limited_until:
             if datetime.fromisoformat(self._gemini_rate_limited_until) <= now:
@@ -468,7 +529,165 @@ class ModelManager:
         ]
         return any(k in s for k in indicators)
 
-    def _estimate_reset_time(self, daily: bool = False) -> Optional[str]:
+    def _is_gemini_invalid_key_error(self, error_str: str) -> bool:
+        s = (error_str or "").lower()
+        indicators = [
+            "api_key_invalid",
+            "api key expired",
+            "invalid api key",
+            "api key not valid",
+            "reason\": \"api_key_invalid\"",
+        ]
+        return any(k in s for k in indicators)
+
+    def _is_gemini_service_unavailable_error(self, error_str: str) -> bool:
+        s = (error_str or "").lower()
+        indicators = [
+            " 503",
+            "status\": \"unavailable\"",
+            "currently experiencing high demand",
+            "temporarily unavailable",
+        ]
+        return any(k in s for k in indicators)
+
+    def _is_gemini_model_hard_limit_error(
+        self,
+        error_str: str,
+        model_identifier: Optional[str],
+    ) -> bool:
+        s = (error_str or "").lower()
+        hard_limit_indicators = [
+            "limit: 0",
+            "free_tier_requests, limit: 0",
+            "free tier requests, limit: 0",
+        ]
+        if not any(ind in s for ind in hard_limit_indicators):
+            return False
+
+        if model_identifier:
+            model_marker = f"model: {model_identifier.lower()}"
+            return model_marker in s
+
+        return "model:" in s
+
+    def _mark_provider_rate_limited(
+        self,
+        provider_name: str,
+        model_identifier: Optional[str],
+        error_str: str,
+    ):
+        if not self._is_rate_limit_error(error_str):
+            return
+
+        provider = (provider_name or "").lower()
+        if "gemini" in provider:
+            if self._is_gemini_model_hard_limit_error(
+                error_str,
+                model_identifier=model_identifier,
+            ):
+                return
+            self._gemini_rate_limited = True
+            self._gemini_rate_limited_until = self._estimate_reset_time(daily=False)
+            return
+
+        if "openai" in provider:
+            self._openai_rate_limited = True
+            self._openai_rate_limited_until = self._estimate_reset_time(daily=False)
+            return
+
+        if "claude" in provider or "anthropic" in provider:
+            self._anthropic_rate_limited = True
+            self._anthropic_rate_limited_until = self._estimate_reset_time(daily=False)
+            return
+
+        if "mistral" in provider:
+            self._mistral_rate_limited = True
+            self._mistral_rate_limited_until = self._estimate_reset_time(daily=False)
+            return
+
+        if "groq" in provider:
+            self._groq_rate_limited = True
+            self._groq_rate_limited_until = self._estimate_reset_time(daily=True)
+            logger.error("❌ Groq TPD 429 while using Groq - flagging as exhausted")
+            return
+
+    def _provider_is_configured(self, provider: str) -> bool:
+        name = (provider or "").lower()
+        if name == "gemini":
+            return bool(settings.ENABLE_GEMINI and self._has_active_gemini_key())
+        if name == "groq":
+            return bool(settings.ENABLE_GROQ and self.groq_client)
+        if name == "openai":
+            return bool(settings.ENABLE_OPENAI and self.openai_api_key)
+        if name == "claude":
+            return bool(settings.ENABLE_ANTHROPIC and self.anthropic_api_key)
+        if name == "mistral":
+            return bool(settings.ENABLE_MISTRAL and self.mistral_api_key)
+        return False
+
+    def _handle_gemini_http_error(
+        self,
+        api_key: Optional[str],
+        status_code: int,
+        error_msg: str,
+        model_identifier: Optional[str],
+        context: str = "text",
+    ) -> bool:
+        """
+        Handle Gemini HTTP error for key rotation.
+
+        Returns True if caller should rotate to next key and continue,
+        otherwise returns False (fatal for this request).
+        """
+        masked_key = f"...{api_key[-4:]}" if api_key else "unknown"
+
+        # Model-level hard limit (e.g., free tier limit:0 for Gemini Pro)
+        # should skip this model directly instead of burning all API keys.
+        if self._is_gemini_model_hard_limit_error(
+            error_msg,
+            model_identifier=model_identifier,
+        ):
+            self._mark_gemini_model_cooldown(model_identifier, daily=True)
+            logger.warning(
+                f"⚠️ Gemini model {model_identifier} has hard quota limit ({context}). "
+                "Skipping model and using fallback chain."
+            )
+            return False
+
+        # Expired/invalid keys should be removed from rotation permanently.
+        if self._is_gemini_invalid_key_error(error_msg):
+            if api_key:
+                self.gemini_invalid_keys.add(api_key)
+                if hasattr(self, "gemini_keys_status"):
+                    self.gemini_keys_status.pop(api_key, None)
+            logger.error(
+                f"❌ Gemini Key {masked_key} invalid/expired ({context}). "
+                "Disabling key from rotation."
+            )
+            return True
+
+        # Quota/rate-limit: cool down key and rotate.
+        if self._is_rate_limit_error(error_msg):
+            if api_key and hasattr(self, "gemini_keys_status"):
+                self.gemini_keys_status[api_key] = self._estimate_reset_time(daily=False)
+            logger.warning(
+                f"⚠️ Gemini Key {masked_key} hit rate limit ({context}). Rotating..."
+            )
+            return True
+
+        # High-demand transient errors (503): short cooldown then rotate.
+        if status_code == 503 or self._is_gemini_service_unavailable_error(error_msg):
+            if api_key and hasattr(self, "gemini_keys_status"):
+                self.gemini_keys_status[api_key] = self._estimate_reset_time(daily=False, minutes=2)
+            logger.warning(
+                f"⚠️ Gemini Key {masked_key} temporarily unavailable ({context}). "
+                "Cooling down and rotating..."
+            )
+            return True
+
+        return False
+
+    def _estimate_reset_time(self, daily: bool = False, minutes: int = 10) -> Optional[str]:
         now = datetime.now(timezone.utc)
         if daily:
             tomorrow = (now + timedelta(days=1)).replace(
@@ -476,7 +695,7 @@ class ModelManager:
             )
             return tomorrow.isoformat()
         # Unknown short-window limits: provide conservative estimate.
-        return (now + timedelta(minutes=10)).isoformat()
+        return (now + timedelta(minutes=max(1, minutes))).isoformat()
 
     def get_quota_status(self, error_message: Optional[str] = None) -> dict:
         """Return quota/rate-limit status for UI and API metadata."""
@@ -517,34 +736,69 @@ class ModelManager:
             },
         }
 
-        any_limited = any(p.get("limited") for p in providers.values())
+        configured_providers = [
+            name for name in providers.keys() if self._provider_is_configured(name)
+        ]
+        all_configured_limited = bool(configured_providers) and all(
+            providers[name].get("limited") for name in configured_providers
+        )
+        explicit_quota_error = any(
+            token in msg
+            for token in [
+                "429",
+                "rate_limit",
+                "rate limit",
+                "quota exceeded",
+                "resource_exhausted",
+                "too many requests",
+            ]
+        )
 
         return {
-            "has_quota_issue": bool(any_limited),
+            "has_quota_issue": bool(all_configured_limited or explicit_quota_error),
             "providers": providers,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
     
     def _get_available_gemini_key(self) -> str:
         if not getattr(self, 'gemini_api_keys', None):
+            if self.gemini_api_key and self.gemini_api_key in self.gemini_invalid_keys:
+                raise Exception("Configured Gemini API key is invalid/disabled")
             return self.gemini_api_key
             
         now = datetime.now(timezone.utc)
+        active_keys = [k for k in self.gemini_api_keys if k not in self.gemini_invalid_keys]
+        if not active_keys:
+            raise Exception("No active Gemini API keys available (all keys invalid/disabled)")
+
         for _ in range(len(self.gemini_api_keys)):
             self.current_gemini_key_idx = (self.current_gemini_key_idx + 1) % len(self.gemini_api_keys)
             key = self.gemini_api_keys[self.current_gemini_key_idx]
+
+            if key in self.gemini_invalid_keys:
+                continue
             
             # Check if this key is rate limited
             limit_until = self.gemini_keys_status.get(key)
-            if limit_until and datetime.fromisoformat(limit_until) > now:
-                continue
+            if limit_until:
+                try:
+                    if datetime.fromisoformat(limit_until) > now:
+                        continue
+                except Exception:
+                    # Recover gracefully from malformed persisted value.
+                    self.gemini_keys_status[key] = None
                 
             self.gemini_keys_status[key] = None
             return key
                 
-        # If all keys are rate limited, return next one anyway (will likely throw 429 and trigger global fallback)
-        self.current_gemini_key_idx = (self.current_gemini_key_idx + 1) % len(self.gemini_api_keys)
-        return self.gemini_api_keys[self.current_gemini_key_idx]
+        # If all active keys are cooling down, return one active key anyway.
+        for _ in range(len(self.gemini_api_keys)):
+            self.current_gemini_key_idx = (self.current_gemini_key_idx + 1) % len(self.gemini_api_keys)
+            key = self.gemini_api_keys[self.current_gemini_key_idx]
+            if key not in self.gemini_invalid_keys:
+                return key
+
+        raise Exception("No active Gemini API keys available")
 
     def _generate_gemini(
         self,
@@ -589,14 +843,17 @@ class ModelManager:
             except httpx.HTTPStatusError as e:
                 body_preview = response.text[:600] if response.text else ""
                 error_msg = f"Gemini API {response.status_code}: {body_preview}"
-                
-                if self._is_rate_limit_error(error_msg):
-                    masked_key = f"...{api_key[-4:]}" if api_key else "unknown"
-                    logger.warning(f"⚠️ Gemini Key {masked_key} hit rate limit. Rotating...")
-                    if hasattr(self, 'gemini_keys_status'):
-                        self.gemini_keys_status[api_key] = self._estimate_reset_time(daily=False)
+
+                should_rotate = self._handle_gemini_http_error(
+                    api_key=api_key,
+                    status_code=response.status_code,
+                    error_msg=error_msg,
+                    model_identifier=model_identifier,
+                    context="text",
+                )
+                if should_rotate:
                     last_exception = Exception(error_msg)
-                    continue # Try the next key
+                    continue  # Try the next key
                 else:
                     raise Exception(error_msg) from e
             except Exception as e:

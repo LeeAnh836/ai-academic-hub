@@ -29,6 +29,11 @@ router = APIRouter(
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".gif"}
+SPREADSHEET_EXTENSIONS = {".csv", ".xlsx", ".xls"}
+CODE_EXTENSIONS = {
+    ".py", ".java", ".js", ".ts", ".tsx", ".jsx", ".cpp", ".c", ".h", ".hpp",
+    ".go", ".rs", ".html", ".css", ".md", ".json", ".xml", ".yaml", ".yml", ".sql", ".sh"
+}
 IMAGE_MIME_TO_EXT = {
     "image/jpeg": ".jpg",
     "image/jpg": ".jpg",
@@ -193,7 +198,7 @@ async def upload_document(
     ext = os.path.splitext(normalized_file_name)[1].lower()
     is_image_upload = ((file.content_type or "").startswith("image/") or ext in IMAGE_EXTENSIONS)
 
-    allowed_exts = ['.pdf', '.docx', '.txt', '.csv', '.xlsx', '.py', '.java', '.js', '.ts', '.html', '.css', '.md', '.cpp', '.jpg', '.jpeg', '.png', '.webp', '.heic']
+    allowed_exts = ['.pdf', '.docx', '.txt', '.csv', '.xlsx', '.xls', '.py', '.java', '.js', '.ts', '.html', '.css', '.md', '.cpp', '.jpg', '.jpeg', '.png', '.webp', '.heic']
     
     if file.content_type not in allowed_types and ext not in allowed_exts:
         raise HTTPException(
@@ -218,21 +223,35 @@ async def upload_document(
         # 2. Auto-detect category if not provided
         detected_category = category
         if not detected_category:
-            # Auto-detect based on file type
-            if file.content_type == "application/pdf":
+            content_type = (file.content_type or "").lower()
+
+            # Auto-detect based on MIME + extension
+            if ext in SPREADSHEET_EXTENSIONS or content_type in {
+                "text/csv",
+                "application/vnd.ms-excel",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            }:
+                detected_category = "csv"
+            elif ext in CODE_EXTENSIONS or content_type in {
+                "text/javascript",
+                "application/javascript",
+                "text/x-python",
+                "application/x-python-code",
+            }:
+                detected_category = "code"
+            elif file.content_type == "application/pdf" or ext == ".pdf":
                 detected_category = "document"
-            elif file.content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            elif (
+                file.content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                or ext in {".doc", ".docx"}
+            ):
                 detected_category = "document"
-            elif file.content_type == "text/plain":
-                # Try to detect from extension
-                if normalized_file_name.endswith(('.py', '.js', '.java', '.cpp', '.c', '.go', '.rs')):
-                    detected_category = "code"
-                else:
-                    detected_category = "text"
-            elif file.content_type and file.content_type.startswith("image/"):
+            elif content_type.startswith("image/"):
                 detected_category = "image"
             elif ext in ['.jpg', '.jpeg', '.png', '.webp', '.heic']:
                 detected_category = "image"
+            elif content_type.startswith("text/") or ext in {".txt", ".md"}:
+                detected_category = "text"
             else:
                 detected_category = "general"
         

@@ -24,13 +24,35 @@ class DocumentProcessingService:
     """Service xử lý document processing pipeline"""
     
     def __init__(self):
-        """Initialize text splitter"""
+        """Initialize token-based text splitter for non pre-chunked documents."""
+        self._token_encoder = self._init_token_encoder()
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=settings.CHUNK_SIZE,
             chunk_overlap=settings.CHUNK_OVERLAP,
-            length_function=len,
+            length_function=self._count_tokens,
             separators=["\n\n", "\n", " ", ""]
         )
+
+    def _init_token_encoder(self):
+        """Initialize tokenizer for chunk size and overlap measurements."""
+        try:
+            import tiktoken
+            return tiktoken.get_encoding("cl100k_base")
+        except Exception as exc:
+            # Safe fallback keeps service available even if tokenizer is missing.
+            logger.warning(
+                "⚠️ Could not initialize tiktoken encoder, fallback to character length: %s",
+                exc,
+            )
+            return None
+
+    def _count_tokens(self, text: str) -> int:
+        """Count tokens used by chunking and token_count metadata."""
+        if not text:
+            return 0
+        if self._token_encoder is None:
+            return len(text)
+        return len(self._token_encoder.encode(text, disallowed_special=()))
 
     # ------------------------------------------------------------------
     # Gemini Vision OCR helper – used for both images and scanned PDFs
@@ -445,7 +467,7 @@ class DocumentProcessingService:
                 "chunk_index": idx,
                 "chunk_text": chunk.page_content,
                 "chunk_metadata": chunk.metadata,
-                "token_count": len(chunk.page_content) // 4,
+                "token_count": self._count_tokens(chunk.page_content),
                 "document_id": document_id,
                 "user_id": user_id,
                 "file_name": file_name

@@ -45,6 +45,7 @@ redis==5.0.1
 
 # Utilities
 python-dotenv==1.0.0
+tiktoken>=0.8.0
 
 # Data Analysis dependencies
 pandas==2.2.0

@@ -87,19 +87,20 @@ function getFileColor(type: string) {
 }
 
 function getFileTypeFromMime(mimeType: string, fileName?: string) {
-  const mt = mimeType.toLowerCase()
-  if (mt.startsWith('image/')) return 'image'
-  if (mt.includes('pdf')) return 'pdf'
-  if (mt.includes('word') || mt.includes('document')) return 'doc'
-  if (mt.includes('csv') || mt.includes('sheet') || mt.includes('excel')) return 'csv'
-  
-  if (fileName) {
-    const ext = fileName.split('.').pop()?.toLowerCase() || ''
-    if (['jpg', 'jpeg', 'png', 'webp', 'heic', 'gif'].includes(ext)) return 'image'
-    if (['py', 'java', 'js', 'html', 'css', 'ts', 'cpp', 'md'].includes(ext)) return 'code'
-  }
-  
-  if (mt.includes('text/plain') || mt === 'text') return 'txt'
+  const mt = (mimeType || '').toLowerCase()
+  const ext = fileName?.split('.').pop()?.toLowerCase() || ''
+
+  if (mt.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp', 'heic', 'gif'].includes(ext)) return 'image'
+  if (mt.includes('pdf') || ext === 'pdf') return 'pdf'
+
+  // Detect spreadsheet before checking "document" because XLSX MIME contains "openxmlformats-officedocument".
+  if (mt.includes('csv') || mt.includes('spreadsheetml') || mt.includes('ms-excel') || mt.includes('excel') || ['csv', 'xlsx', 'xls'].includes(ext)) return 'csv'
+
+  if (mt.includes('wordprocessingml') || mt.includes('msword') || ['doc', 'docx'].includes(ext)) return 'doc'
+
+  if (['py', 'java', 'js', 'ts', 'tsx', 'jsx', 'html', 'css', 'cpp', 'c', 'h', 'hpp', 'md', 'json', 'xml', 'yaml', 'yml', 'sql', 'sh'].includes(ext)) return 'code'
+
+  if (mt.includes('text/plain') || mt.startsWith('text/') || ext === 'txt') return 'txt'
   return 'file'
 }
 
@@ -428,7 +429,7 @@ export function DocumentsPage() {
             <Card
               key={doc.id}
               className="group cursor-pointer transition-all hover:shadow-md"
-              onDoubleClick={() => setPreviewDoc(doc)}
+              onClick={() => setPreviewDoc(doc)}
               title={t("docs.dblClickPreview")}
             >
               <CardContent className="p-4">
@@ -496,7 +497,7 @@ export function DocumentsPage() {
               <div
                 key={doc.id}
                 className="group flex items-center gap-4 px-4 py-3 transition-colors hover:bg-secondary cursor-pointer"
-                onDoubleClick={() => setPreviewDoc(doc)}
+                onClick={() => setPreviewDoc(doc)}
                 title={t("docs.dblClickPreview")}
               >
                 <div className="flex flex-1 items-center gap-3 overflow-hidden">

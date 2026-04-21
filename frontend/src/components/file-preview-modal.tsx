@@ -12,7 +12,7 @@ interface FilePreviewModalProps {
   onClose: () => void
 }
 
-type FileKind = "pdf" | "docx" | "csv" | "txt" | "image" | "unsupported"
+type FileKind = "pdf" | "docx" | "csv" | "xlsx" | "txt" | "code" | "image" | "unsupported"
 
 type PreviewState =
   | { status: "idle" }
@@ -25,14 +25,42 @@ type PreviewState =
   | { status: "unsupported" }
   | { status: "error"; message: string; detail?: string }
 
+const CODE_EXTENSIONS = new Set([
+  "py", "java", "js", "ts", "tsx", "jsx", "cpp", "c", "h", "hpp", "css", "html", "md", "json", "xml", "yaml", "yml", "sql", "sh"
+])
+
 function resolveKind(mimeType: string, fileName: string): FileKind {
+  const mt = (mimeType || "").toLowerCase()
   const ext = fileName.split(".").pop()?.toLowerCase() ?? ""
-  if (mimeType.startsWith("image/") || ["jpg", "jpeg", "png", "webp", "heic", "gif"].includes(ext)) return "image"
-  if (mimeType.includes("pdf") || ext === "pdf") return "pdf"
-  if (mimeType.includes("wordprocessingml") || mimeType.includes("msword") || ext === "docx" || ext === "doc") return "docx"
-  if (mimeType.includes("csv") || ext === "csv") return "csv"
-  if (mimeType.includes("text/plain") || mimeType.includes("text") || ext === "txt") return "txt"
+  if (mt.startsWith("image/") || ["jpg", "jpeg", "png", "webp", "heic", "gif"].includes(ext)) return "image"
+  if (mt.includes("pdf") || ext === "pdf") return "pdf"
+  if (mt.includes("wordprocessingml") || mt.includes("msword") || ext === "docx" || ext === "doc") return "docx"
+  if (mt.includes("csv") || ext === "csv") return "csv"
+  if (mt.includes("spreadsheetml") || mt.includes("ms-excel") || mt.includes("excel") || ext === "xlsx" || ext === "xls") return "xlsx"
+  if (CODE_EXTENSIONS.has(ext) || mt.includes("javascript") || mt.includes("x-python") || mt.includes("json") || mt.includes("xml") || mt.includes("yaml")) return "code"
+  if (mt.includes("text/plain") || mt.startsWith("text/") || ext === "txt") return "txt"
   return "unsupported"
+}
+
+function normalizeTableRows(rawRows: unknown[][]): { headers: string[]; rows: string[][] } {
+  if (!rawRows.length) return { headers: [], rows: [] }
+
+  const matrix = rawRows.map((row) => row.map((cell) => (cell == null ? "" : String(cell))))
+  const maxColumns = matrix.reduce((max, row) => Math.max(max, row.length), 0)
+  if (maxColumns === 0) return { headers: [], rows: [] }
+
+  const [firstRow = [], ...otherRows] = matrix
+  const firstNormalized = Array.from({ length: maxColumns }, (_, idx) => firstRow[idx] ?? "")
+  const hasHeaderValues = firstNormalized.some((cell) => cell.trim().length > 0)
+
+  const headers = hasHeaderValues
+    ? firstNormalized.map((cell, idx) => cell || `Col ${idx + 1}`)
+    : Array.from({ length: maxColumns }, (_, idx) => `Col ${idx + 1}`)
+
+  const bodySource = hasHeaderValues ? otherRows : matrix
+  const rows = bodySource.map((row) => Array.from({ length: maxColumns }, (_, idx) => row[idx] ?? ""))
+
+  return { headers, rows }
 }
 
 async function fetchDocBlob(docId: string): Promise<Blob> {
@@ -85,7 +113,7 @@ export function FilePreviewModal({ doc, onClose }: FilePreviewModalProps) {
       return
     }
 
-    if (kind === "txt") {
+    if (kind === "txt" || kind === "code") {
       try {
         const blob = await fetchDocBlob(document.id)
         const text = await blob.text()
@@ -99,8 +127,31 @@ export function FilePreviewModal({ doc, onClose }: FilePreviewModalProps) {
         const blob = await fetchDocBlob(document.id)
         const text = await blob.text()
         const result = Papa.parse<string[]>(text, { skipEmptyLines: true })
-        const [headers = [], ...rows] = result.data as string[][]
-        setState({ status: "csv", headers, rows })
+        const table = normalizeTableRows(result.data as unknown[][])
+        setState({ status: "csv", headers: table.headers, rows: table.rows })
+      } catch (err: any) { setState({ status: "error", message: t("preview.cantReadCsv"), detail: err.message }) }
+      return
+    }
+
+    if (kind === "xlsx") {
+      try {
+        const blob = await fetchDocBlob(document.id)
+        const { read, utils } = await import("xlsx")
+        const workbook = read(await blob.arrayBuffer(), { type: "array" })
+        const firstSheet = workbook.SheetNames[0]
+        if (!firstSheet) {
+          setState({ status: "csv", headers: [], rows: [] })
+          return
+        }
+
+        const worksheet = workbook.Sheets[firstSheet]
+        const matrix = utils.sheet_to_json(worksheet, {
+          header: 1,
+          defval: "",
+          blankrows: false,
+        }) as unknown[][]
+        const table = normalizeTableRows(matrix)
+        setState({ status: "csv", headers: table.headers, rows: table.rows })
       } catch (err: any) { setState({ status: "error", message: t("preview.cantReadCsv"), detail: err.message }) }
       return
     }
@@ -152,7 +203,16 @@ export function FilePreviewModal({ doc, onClose }: FilePreviewModalProps) {
   if (!doc) return null
   const kind = resolveKind(doc.file_type, doc.file_name)
   const ext = doc.file_name.split(".").pop()?.toUpperCase() ?? ""
-  const kindColor: Record<FileKind, string> = { pdf: "text-red-500", docx: "text-blue-500", csv: "text-emerald-500", txt: "text-purple-500", image: "text-pink-500", unsupported: "text-muted-foreground" }
+  const kindColor: Record<FileKind, string> = {
+    pdf: "text-red-500",
+    docx: "text-blue-500",
+    csv: "text-emerald-500",
+    xlsx: "text-emerald-500",
+    txt: "text-purple-500",
+    code: "text-amber-500",
+    image: "text-pink-500",
+    unsupported: "text-muted-foreground",
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 sm:p-4 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
