@@ -876,6 +876,8 @@ async def ask_in_chat_session(
             "source_ids": source_ids_for_ai,
             "source_metadata": source_metadata_for_ai,
             "trace_id": trace_id,
+            # Backend is the single writer for Mongo chat history + summaries
+            # via `chat_history_service`. Prevent ai-service from writing duplicates.
             "persisted_by_backend": True,
         }
         

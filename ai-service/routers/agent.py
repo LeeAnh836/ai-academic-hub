@@ -177,7 +177,8 @@ async def analyze_data(
         context = {
             "file_data": file_data,
             "file_name": file_name,
-            "file_path": None  # Not using file_path, using file_data directly
+            "file_path": None,  # Not using file_path, using file_data directly
+            "force_intent": "data_analysis"
         }
         
         # Process with orchestrator

@@ -12,6 +12,7 @@ from services.embedding_service import embedding_service
 from services.hybrid_rag_service import hybrid_rag_service
 from services.advanced_rag_service import advanced_rag_service
 from services.corrective_rag import corrective_rag
+from services.computation_pipeline import computation_pipeline
 from core.qdrant import qdrant_manager
 from core.config import settings
 from services.query_complexity_analyzer import complexity_analyzer
@@ -124,12 +125,51 @@ class DocumentQAAgent(BaseAgent):
                 }
                 if fallback_contexts:
                     contexts = fallback_contexts
+
+            # Visual/color follow-up fallback: try keyword-focused retrieval
+            contexts = await self._maybe_expand_contexts_for_visual_query(
+                query=query,
+                contexts=contexts,
+                user_id=user_id,
+                document_ids=document_ids,
+                source_metadata=source_metadata,
+                top_k=top_k,
+            )
             
             if not contexts:
                 return {
                     "answer": "Tôi không tìm thấy thông tin phù hợp trong tài liệu của bạn. Vui lòng thử câu hỏi khác hoặc upload thêm tài liệu.",
                     "contexts": [],
                     "metadata": {"no_context_found": True}
+                }
+
+            # ── Computation / Analysis pipeline ───────────────────────
+            if intent in {"computation", "analysis"}:
+                logger.info(f"🧮 Using computation pipeline for intent={intent}")
+                comp_result = computation_pipeline.run(
+                    query=query,
+                    contexts=contexts,
+                    intent=intent,
+                    chat_history=chat_history,
+                    source_metadata=source_metadata,
+                )
+                doc_map = self._build_doc_map(contexts)
+                return {
+                    "answer": comp_result.get("answer", ""),
+                    "contexts": contexts,
+                    "metadata": {
+                        "model": "tool+llm",
+                        "contexts_count": len(contexts),
+                        "retrieval_mode": "advanced_rag" if settings.ENABLE_ADVANCED_RAG else (
+                            "hybrid" if settings.ENABLE_GRAPH_RAG else "vector_only"
+                        ),
+                        "pipeline": {
+                            "retrieval": pipeline_meta,
+                            **(comp_result.get("metadata") or {})
+                        },
+                        "doc_map": doc_map,
+                        **self.build_quota_metadata(comp_result.get("answer", ""))
+                    }
                 }
             
             # Generate answer from contexts
@@ -340,6 +380,176 @@ class DocumentQAAgent(BaseAgent):
 
         return has_deictic and has_object and len(query_lower.split()) <= 18
 
+    def _is_color_query(self, query: str) -> bool:
+        query_lower = (query or "").lower()
+        return any(marker in query_lower for marker in ["màu", "mau", "color", "colored"])
+
+    def _wants_visual_details(self, query: str) -> bool:
+        query_lower = (query or "").lower()
+        markers = [
+            "màu", "mau", "color", "colored",
+            "đặc điểm", "dac diem", "màu sắc", "mau sac",
+            "ngoại hình", "ngoai hinh", "hình dáng", "hinh dang",
+            "hoa văn", "pattern", "trên lưng", "tren lung",
+        ]
+        return any(marker in query_lower for marker in markers)
+
+    def _extract_focus_terms(self, query: str) -> List[str]:
+        """
+        Extract a likely target entity from Vietnamese/English visual questions.
+        Example: "con ong màu gì" -> ["ong"].
+        """
+        query_lower = (query or "").lower()
+        terms: List[str] = []
+
+        # Vietnamese pattern: "con <animal>"
+        match = re.search(r"\bcon\s+([a-zA-ZÀ-ỹ]+(?:\s+[a-zA-ZÀ-ỹ]+)?)", query_lower)
+        if match:
+            term = match.group(1).strip()
+            if term.endswith(" con"):
+                term = term[: -len(" con")].strip()
+            if term:
+                terms.append(term)
+
+        # English pattern: "the <animal>" / "a <animal>"
+        match_en = re.search(r"\b(?:the|a|an)\s+([a-zA-Z]+)", query_lower)
+        if match_en:
+            terms.append(match_en.group(1).strip())
+
+        # Deduplicate while preserving order
+        seen = set()
+        uniq_terms = []
+        for t in terms:
+            if t and t not in seen:
+                seen.add(t)
+                uniq_terms.append(t)
+        return uniq_terms
+
+    def _contexts_contain_terms(self, contexts: List[Dict[str, Any]], terms: List[str]) -> bool:
+        if not contexts or not terms:
+            return False
+        for ctx in contexts:
+            text = (ctx.get("chunk_text") or "").lower()
+            if any(term in text for term in terms):
+                return True
+        return False
+
+    def _merge_contexts(
+        self,
+        primary: List[Dict[str, Any]],
+        extra: List[Dict[str, Any]],
+        top_k: int,
+    ) -> List[Dict[str, Any]]:
+        seen = set()
+        merged: List[Dict[str, Any]] = []
+        for ctx in primary + extra:
+            ctx_id = ctx.get("chunk_id") or f"{ctx.get('document_id')}:{ctx.get('chunk_index')}"
+            if ctx_id in seen:
+                continue
+            seen.add(ctx_id)
+            merged.append(ctx)
+        return merged[:top_k]
+
+    def _has_image_source(self, source_metadata: Optional[List[Dict[str, Any]]]) -> bool:
+        if not source_metadata:
+            return False
+        image_exts = (".png", ".jpg", ".jpeg", ".webp", ".heic")
+        for source in source_metadata:
+            mime_type = (source.get("mime_type") or "").lower()
+            file_name = (source.get("file_name") or "").lower()
+            if mime_type.startswith("image/") or file_name.endswith(image_exts):
+                return True
+        return False
+
+    async def _retrieve_keyword_contexts(
+        self,
+        user_id: str,
+        document_ids: List[str],
+        keywords: List[str],
+        top_k: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Scroll selected documents and collect chunks containing any keyword.
+        Useful for visual follow-ups where semantic retrieval misses the entity.
+        """
+        if not document_ids or not keywords:
+            return []
+
+        matched: List[Dict[str, Any]] = []
+        per_doc_limit = max(8, min(80, top_k * 6))
+
+        for doc_id in document_ids:
+            query_filter = Filter(
+                must=[
+                    FieldCondition(key="user_id", match=MatchValue(value=user_id)),
+                    FieldCondition(key="document_id", match=MatchValue(value=doc_id)),
+                ]
+            )
+
+            results, _ = qdrant_manager.client.scroll(
+                collection_name=qdrant_manager.collection_name,
+                scroll_filter=query_filter,
+                limit=per_doc_limit,
+                with_payload=True,
+                with_vectors=False,
+            )
+
+            for result in results:
+                chunk_text = result.payload.get("chunk_text", "")
+                if not chunk_text:
+                    continue
+                lower_text = chunk_text.lower()
+                if any(keyword in lower_text for keyword in keywords):
+                    matched.append({
+                        "chunk_id": result.id,
+                        "score": 1.0,
+                        "chunk_text": chunk_text,
+                        "chunk_index": result.payload.get("chunk_index", 0),
+                        "document_id": result.payload.get("document_id", ""),
+                        "file_name": result.payload.get("file_name", ""),
+                        "title": result.payload.get("title", ""),
+                        "source": "keyword_fallback",
+                    })
+
+        matched.sort(key=lambda item: item.get("chunk_index", 0))
+        return matched[:top_k]
+
+    async def _maybe_expand_contexts_for_visual_query(
+        self,
+        query: str,
+        contexts: List[Dict[str, Any]],
+        user_id: str,
+        document_ids: Optional[List[str]],
+        source_metadata: Optional[List[Dict[str, Any]]],
+        top_k: int,
+    ) -> List[Dict[str, Any]]:
+        if not document_ids:
+            return contexts
+        if not self._is_color_query(query):
+            return contexts
+
+        focus_terms = self._extract_focus_terms(query)
+        if not focus_terms:
+            return contexts
+
+        if self._contexts_contain_terms(contexts, focus_terms):
+            return contexts
+
+        # Prefer keyword fallback when an image source is active
+        if source_metadata and not self._has_image_source(source_metadata):
+            return contexts
+
+        extra_contexts = await self._retrieve_keyword_contexts(
+            user_id=user_id,
+            document_ids=document_ids,
+            keywords=focus_terms,
+            top_k=top_k,
+        )
+        if not extra_contexts:
+            return contexts
+
+        return self._merge_contexts(contexts, extra_contexts, top_k)
+
     async def _retrieve_reference_contexts(
         self,
         user_id: str,
@@ -462,12 +672,20 @@ class DocumentQAAgent(BaseAgent):
             system_instruction = self._get_system_prompt_rag(complexity, request_type)
             
             # Build prompt with explicit grounding instruction
+            visual_note = ""
+            if not self._wants_visual_details(query):
+                visual_note = (
+                    "\nLƯU Ý: Câu hỏi KHÔNG yêu cầu màu sắc/đặc điểm trực quan. "
+                    "KHÔNG nêu màu, hoa văn, hình dáng nếu không được hỏi.\n"
+                )
+
             user_prompt = f"""=== BẮT ĐẦU TÀI LIỆU (CHỈ sử dụng thông tin trong phần này) ===
 {context_str}
 === KẾT THÚC TÀI LIỆU ===
 {summary_section}
 {source_meta_section}
 {history_section}
+{visual_note}
 CÂU HỎI: {query}
 
 ⚠️ NHẮC LẠI: Chỉ trả lời dựa trên NỘI DUNG TÀI LIỆU ở trên. KHÔNG thêm kiến thức bên ngoài. Nếu tài liệu không có thông tin → nói rõ "Tài liệu không đề cập".
@@ -578,7 +796,11 @@ TRẢ LỜI:"""
             if len(content) > 1000:
                 content = content[:1000] + "\n...[truncated]"
             lines.append(f"{role}: {content}")
-        return "\nLỊCH SỬ TRÒ CHUYỆN GẦN ĐÂY:\n" + "\n".join(lines) + "\n"
+        return (
+            "\nLỊCH SỬ TRÒ CHUYỆN GẦN ĐÂY (chỉ dùng để hiểu ngữ cảnh và nhắc lại thông tin đã nêu từ tài liệu):\n"
+            + "\n".join(lines)
+            + "\n"
+        )
 
     def _build_summary_section(self, conversation_summary: Optional[str]) -> str:
         if not conversation_summary:
@@ -809,6 +1031,7 @@ YÊU CẦU:
 ✅ Trích dẫn nguồn bằng TÊN FILE trong ngoặc vuông: "Theo [tên_file.pdf], ..."
 ✅ KHÔNG giải thích dài dòng
 ✅ KHÔNG dùng heading/format phức tạp
+✅ Chỉ nêu màu sắc/đặc điểm trực quan khi câu hỏi yêu cầu trực tiếp; nếu chỉ hỏi "có gì" thì chỉ liệt kê đối tượng
 
 VÍ DỤ:
 - "Định nghĩa X?" → "Theo [bai_giang.pdf], X là..."
@@ -842,7 +1065,7 @@ TL: "Theo [moi_truong.pdf], bảo vệ môi trường là trách nhiệm..."
             
             # ANALYTICAL MODE: Trả lời câu hỏi từ tài liệu
             else:
-                return """Bạn là trợ lý học tập chuyên môn. Trả lời CHÍNH XÁC và ĐẦY ĐỦ dựa trên tài liệu.
+                return """Bạn là trợ lý học tập chuyên môn. Trả lời CHÍNH XÁC và ĐỦ Ý dựa trên tài liệu, theo văn phong tự nhiên.
 
 ⛔ NGUYÊN TẮC TUYỆT ĐỐI - PHẢI TUÂN THỦ:
 1. CHỈ trả lời dựa trên thông tin CÓ TRONG tài liệu được cung cấp bên dưới
@@ -855,15 +1078,12 @@ NGUYÊN TẮC CHẤT LƯỢNG:
 ✅ **CHÍNH XÁC tuyệt đối**: Chỉ dựa vào tài liệu cung cấp
 ✅ **ĐẦY ĐỦ**: Không bỏ sót thông tin quan trọng từ tài liệu
 ✅ **TRÍCH DẪN RÕ RÀNG**: Trích dẫn bằng TÊN FILE trong ngoặc vuông: "Theo [tên_file.pdf], ..."
-✅ **CÓ CẤU TRÚC**: Dùng markdown để dễ đọc
-
-FORMAT OUTPUT: Markdown (dùng **, -)
-
-CẤU TRÚC:
-- **Định nghĩa/Tóm tắt**: 1-2 câu ngắn gọn, trích dẫn từ tài liệu
-- **Các thành phần/khía cạnh chính**: Liệt kê ĐẦY ĐỦ từ tài liệu
-- **Giải thích**: Mỗi thành phần giải thích CHỈ theo nội dung tài liệu
-- **Trích dẫn**: "Theo [tên_file.pdf], ..."
+✅ **LINH HOẠT FORMAT**:
+   - Nếu câu hỏi 1 ý: trả lời dạng đoạn văn ngắn + 1 trích dẫn
+   - Nếu nhiều ý: dùng bullet points
+   - Không bắt buộc các mục "Định nghĩa/Thành phần/Ứng dụng" nếu không cần
+✅ **LIÊN KẾT NGỮ CẢNH**: Có thể dùng lịch sử trò chuyện để hiểu câu hỏi và nhắc lại thông tin đã nêu từ tài liệu/ảnh
+✅ **ĐẶC ĐIỂM TRỰC QUAN THEO CÂU HỎI**: Chỉ liệt kê màu/đặc điểm trực quan khi câu hỏi yêu cầu; nếu hỏi "có gì" thì chỉ liệt kê đối tượng
 
 YÊU CẦU:
 ✅ Dựa HOÀN TOÀN vào tài liệu
@@ -871,6 +1091,7 @@ YÊU CẦU:
 ✅ Dùng markdown: **bold**, - bullet
 ✅ CẤM bỏ sót thông tin quan trọng trong tài liệu
 ✅ KHÔNG dùng "Tài liệu 1", "Tài liệu 2" - phải dùng TÊN FILE thực
+✅ Nếu hỏi về màu sắc/đặc điểm trực quan, liệt kê ĐẦY ĐỦ mọi màu/đặc điểm được nêu trong tài liệu
 
 VÍ DỤ TRẢ LỜI TỐT:
 "Theo [bai_giang_OOP.pdf], OOP có **4 nguyên lý cơ bản**: **Encapsulation** (đóng gói), **Inheritance** (kế thừa)..."
@@ -902,7 +1123,7 @@ TL: "Theo [research_paper.pdf], nghiên cứu cho thấy..."
             
             # ANALYTICAL MODE: Phân tích chuyên sâu từ tài liệu
             else:
-                return """Bạn là trợ lý học tập chuyên sâu. Trả lời CHI TIẾT và TOÀN DIỆN dựa trên tài liệu.
+                return """Bạn là trợ lý học tập chuyên sâu. Trả lời CHI TIẾT và CÓ CHIỀU SÂU dựa trên tài liệu, nhưng không rập khuôn.
 
 ⛔ NGUYÊN TẮC TUYỆT ĐỐI - PHẢI TUÂN THỦ:
 1. CHỈ trả lời dựa trên thông tin CÓ TRONG tài liệu được cung cấp bên dưới
@@ -918,6 +1139,9 @@ NGUYÊN TẮC CHẤT LƯỢNG:
 ✅ **CÓ CHIỀU SÂU**: Phân tích kỹ lưỡng, kết nối các ý TRONG tài liệu
 ✅ **TRÍCH DẪN cụ thể**: Trích dẫn bằng TÊN FILE trong ngoặc vuông: "Theo [tên_file.pdf], ..."
 ✅ **CÓ CẤU TRÚC**: Markdown với heading và formatting
+✅ **LIÊN KẾT NGỮ CẢNH**: Có thể dùng lịch sử trò chuyện để hiểu câu hỏi và nhắc lại thông tin đã nêu từ tài liệu/ảnh
+✅ **ĐẶC ĐIỂM TRỰC QUAN THEO CÂU HỎI**: Chỉ liệt kê màu/đặc điểm trực quan khi câu hỏi yêu cầu; nếu hỏi "có gì" thì chỉ liệt kê đối tượng
+✅ **LINH HOẠT**: Không bắt buộc phải có các mục cố định. Trả lời thẳng vào yêu cầu, chỉ dùng heading khi có nhiều ý.
 
 FORMAT OUTPUT: Markdown (dùng ###, **, -, 1.)
 
@@ -946,7 +1170,7 @@ Liệt kê **ĐẦY ĐỦ TẤT CẢ** các điểm quan trọng từ tài liệ
 
 YÊU CẦU:
 ✅ Dựa HOÀN TOÀN vào tài liệu (KHÔNG tự thêm kiến thức dù biết câu trả lời)
-✅ Chi tiết (~400-800 từ)
+✅ Chi tiết (~300-700 từ, tùy độ khó)
 ✅ CẤM bỏ sót thông tin quan trọng
 ✅ Trích dẫn cụ thể từng phần bằng TÊN FILE trong ngoặc vuông
 ✅ KHÔNG dùng "Tài liệu 1", "Tài liệu 2" - phải dùng tên file thực

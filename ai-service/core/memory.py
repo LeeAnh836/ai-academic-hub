@@ -199,6 +199,77 @@ class MemoryManager:
         if not self.enabled:
             return []
 
+    def get_last_sequence(
+        self,
+        user_id: str,
+        session_id: str,
+    ) -> int:
+        """
+        Return the latest message sequence_no for a conversation.
+        Used by auto-summary to know how far we've summarized.
+        """
+        if not self.enabled:
+            return 0
+        try:
+            state = self.db["conversation_state"].find_one(
+                {"conversation_id": session_id, "user_id": user_id},
+                projection={"last_message_sequence": 1},
+            )
+            return int((state or {}).get("last_message_sequence") or 0)
+        except Exception as e:
+            logger.error(f"[ERR] Failed to get last sequence: {e}")
+            return 0
+
+    def get_messages_since_sequence(
+        self,
+        user_id: str,
+        session_id: str,
+        after_sequence_no: int,
+        limit: int = 40,
+    ) -> List[Dict]:
+        """
+        Get messages with sequence_no > after_sequence_no, ordered ascending.
+        Keeps payload minimal for LLM summarization.
+        """
+        if not self.enabled:
+            return []
+        try:
+            cursor = (
+                self.db["messages"]
+                .find(
+                    {
+                        "conversation_id": session_id,
+                        "user_id": user_id,
+                        "deleted_at": None,
+                        "sequence_no": {"$gt": int(after_sequence_no)},
+                    },
+                    projection={
+                        "_id": 0,
+                        "role": 1,
+                        "content_text": 1,
+                        "sequence_no": 1,
+                        "created_at": 1,
+                        "metadata": 1,
+                    },
+                )
+                .sort("sequence_no", ASCENDING)
+                .limit(int(limit))
+            )
+            rows = list(cursor)
+            return [
+                {
+                    "role": row.get("role"),
+                    "content": row.get("content_text", ""),
+                    "sequence_no": int(row.get("sequence_no") or 0),
+                    "timestamp": row.get("created_at"),
+                    "metadata": row.get("metadata", {}) or {},
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            logger.error(f"[ERR] Failed to get messages since sequence: {e}")
+            return []
+
         try:
             cursor = (
                 self.db["messages"]

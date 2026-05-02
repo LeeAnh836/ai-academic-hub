@@ -1,10 +1,8 @@
 """
 Intent Classifier - Route queries to appropriate handlers
-Classifies user intent to determine processing strategy using HYBRID approach:
-- Rule-based for obvious cases (fast)
-- LLM-based for ambiguous cases (accurate)
+Classifies user intent to determine processing strategy using LLM-first approach.
 """
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from core.model_manager import model_manager
 from core.llm_cache import llm_cache
 
@@ -16,135 +14,29 @@ class IntentClassifier:
     
     # Intent definitions with keywords and characteristics
     INTENTS = {
-        "direct_chat": {
-            "keywords": [
-                "giải", "tính", "viết code", "debug", "lỗi", "sửa",
-                "giải thích", "là gì", "tại sao", "làm thế nào",
-                "ví dụ", "so với", "chương trình"
-            ],
-            "requires_documents": False,
-            "description": "General questions, homework, coding - no documents needed",
+        "qa": {
+            "description": "Hỏi kiến thức, giải thích khái niệm, tóm tắt, hỏi nội dung tài liệu/ảnh, sinh code",
             "examples": [
-                "Giải phương trình: x^2 + 2x + 1 = 0",
-                "Viết code Python để sắp xếp mảng",
-                "Giải thích khái niệm recursion",
-                "Tại sao Python lại phổ biến?"
+                "OOP là gì?",
+                "Tóm tắt tài liệu này",
+                "Theo file, CICD là gì?",
+                "Viết code Python sắp xếp mảng"
             ]
         },
-        
-        "rag_query": {
-            "keywords": [
-                # Explicit keywords
-                "theo tài liệu", "trong file", "trong tài liệu",
-                "dựa vào", "dựa theo", "file nói gì",
-                "tài liệu có", "trong bài", "theo bài",
-                # Implicit document references (MORE INTELLIGENT)
-                "file này", "tài liệu này", "file đó", "tài liệu đó",
-                "file vừa", "tài liệu vừa", "file mới", "tài liệu mới",
-                "file upload", "file tải", "file đã upload", "file đã tải",
-                "tóm tắt file", "file nói về", "nội dung file",
-                "tóm tắt tài liệu", "tài liệu nói về", "nội dung tài liệu",
-                # Data/document keywords
-                "file dữ liệu", "tài liệu dữ liệu", "dữ liệu trong file",
-                "document", "uploaded file", "my file", "my document"
-            ],
-            "requires_documents": True,
-            "description": "Fact-finding from uploaded documents",
+        "computation": {
+            "description": "Bài toán tính toán ra kết quả số, giải bài tập, công thức",
             "examples": [
-                "CICD là gì theo tài liệu?",
-                "Trong file vừa upload có nói gì về Docker?",
-                "Dựa vào tài liệu, RAG hoạt động như thế nào?",
-                "Tóm tắt file dữ liệu này",  # NEW
-                "File này nói về gì?",  # NEW
-                "File dữ liệu có thông tin về gì?"  # NEW
+                "Tính trung bình mẫu cần thiết với sai số 1 giây",
+                "Giải bài 5.12 trong hình",
+                "Tính xác suất và đưa kết quả số"
             ]
         },
-        
-        "data_analysis": {
-            "keywords": [
-                "phân tích", "analyze", "analysis", "thống kê", "statistics",
-                "tính toán", "compute", "doanh thu", "revenue",
-                "theo tháng", "monthly", "theo năm", "yearly",
-                "trung bình", "average", "tổng", "sum",
-                "biểu đồ", "chart", "graph", "plot",
-                "csv", "excel", "dữ liệu", "data"
-            ],
-            "requires_documents": False,  # Uses data files, not text documents
-            "requires_file": True,
-            "description": "Data analysis with CSV/Excel using pandas",
+        "analysis": {
+            "description": "Phân tích, thống kê, so sánh số liệu; phân tích dữ liệu CSV/Excel",
             "examples": [
                 "Phân tích doanh thu theo tháng",
-                "Tính trung bình của cột revenue",
-                "Tạo biểu đồ từ dữ liệu sales",
-                "Thống kê số lượng theo danh mục"
-            ]
-        },
-        
-        "summarization": {
-            "keywords": [
-                "tóm tắt", "summarize", "tổng hợp", "tổng kết",
-                "summary", "overview", "nội dung chính",
-                "điểm chính", "key points",
-                # More variations for summarization
-                "tóm lại", "tóm gọn", "nói về gì", "bài này về",
-                "chủ đề", "topic", "subject", "about what"
-            ],
-            "requires_full_document": True,
-            "description": "Summarize entire document",
-            "examples": [
-                "Tóm tắt tài liệu này",
-                "Nội dung chính của file là gì?",
-                "Tổng hợp các điểm quan trọng",
-                "File nói về gì?",  # NEW
-                "Tóm tắt file dữ liệu"  # NEW
-            ]
-        },
-        
-        "question_generation": {
-            "keywords": [
-                "tạo câu hỏi", "đưa ra câu hỏi", "gợi ý câu hỏi",
-                "câu hỏi khác", "câu hỏi thêm", "câu hỏi tương tự",
-                "generate questions", "suggest questions",
-                "questions about", "quiz", "practice questions"
-            ],
-            "creative_mode": True,
-            "requires_documents": True,
-            "description": "Generate new questions from document content",
-            "examples": [
-                "Tạo 10 câu hỏi từ tài liệu này",
-                "Đưa ra câu hỏi để ôn tập",
-                "Gợi ý câu hỏi về chủ đề Docker"
-            ]
-        },
-        
-        "homework_solver": {
-            "keywords": [
-                "giải bài", "giải bài tập", "homework",
-                "bài tập", "exercise", "problem",
-                "làm giúp", "hướng dẫn giải"
-            ],
-            "reasoning_required": True,
-            "requires_documents": False,
-            "description": "Step-by-step homework/problem solving",
-            "examples": [
-                "Giúp tôi giải bài toán này",
-                "Hướng dẫn làm bài tập Python",
-                "Giải bài tập về linked list"
-            ]
-        },
-        
-        "code_help": {
-            "keywords": [
-                "code", "viết code", "lập trình", "program",
-                "implement", "function", "class", "debug"
-            ],
-            "reasoning_required": True,
-            "requires_documents": False,
-            "description": "Code writing, debugging, implementation",
-            "examples": [
-                "Viết hàm tìm số nguyên tố",
-                "Code này bị lỗi gì?",
-                "Implement binary search"
+                "Thống kê tỷ lệ theo nhóm",
+                "So sánh xu hướng giữa 2 tập dữ liệu"
             ]
         }
     }
@@ -153,122 +45,36 @@ class IntentClassifier:
         self,
         question: str,
         has_documents: bool = False,
-        document_count: int = 0
+        document_count: int = 0,
+        chat_history: Optional[List[Dict[str, Any]]] = None,
+        source_metadata: Optional[List[Dict[str, Any]]] = None,
+        has_tabular_data: bool = False,
     ) -> str:
         """
-        Classify user intent using HYBRID approach:
-        1. Rule-based for obvious cases (fast)
-        2. LLM-based for ambiguous cases (accurate)
-        
-        Args:
-            question: User's question
-            has_documents: Whether user has uploaded documents
-            document_count: Number of documents in context
-        
-        Returns:
-            Intent name (str)
+        Classify user intent using LLM-first approach with context.
+        Rule-based fallback is used only when LLM fails.
         """
-        question_lower = question.lower()
-        
+        question_text = (question or "").strip()
+
         print(f"\n🎯 ========== INTENT CLASSIFICATION ==========")
-        print(f"   Question: '{question}'")
+        print(f"   Question: '{question_text}'")
         print(f"   Has documents: {has_documents}, Count: {document_count}")
-        
-        # ========================================
-        # PHASE 1: RULE-BASED (Obvious Cases)
-        # ========================================
-        
-        # 0. Document Reference Detection (MUST be checked BEFORE code/data keywords)
-        # When user has documents AND references them, prioritize document intents
-        # This prevents "file python này" from being classified as code_help
-        doc_ref_indicators = [
-            "theo tài liệu", "trong file", "file vừa upload", "file này nói",
-            "trong tài liệu", "file này", "tài liệu này", "file đó", "tài liệu đó",
-            "file vừa", "tài liệu vừa", "file mới", "tài liệu mới",
-            "file upload", "file tải", "file đã upload", "file đã tải",
-            "nội dung file", "nội dung tài liệu",
-            "file trên", "tài liệu trên",
-            "phân tích file", "xem file", "đọc file", "review file",
-            "phân tích tài liệu", "xem tài liệu", "đọc tài liệu",
-        ]
-        has_doc_reference = any(ref in question_lower for ref in doc_ref_indicators)
-        
-        if has_doc_reference and has_documents and document_count > 0:
-            # Check if it's a summarization request about documents
-            summarization_keywords = [
-                "tóm tắt", "summarize", "summary", "tổng hợp", "tổng kết",
-                "nội dung chính", "điểm chính", "nói về gì", "bài này về",
-                "overview", "tóm lại", "tóm gọn"
-            ]
-            if any(kw in question_lower for kw in summarization_keywords):
-                print(f"✅ Intent: SUMMARIZATION (rule-based: doc ref + summarization keywords + has docs)")
-                print(f"================================================\n")
-                return "summarization"
-            
-            # Otherwise it's a RAG query about the documents
-            print(f"✅ Intent: RAG_QUERY (rule-based: doc ref + has docs)")
-            print(f"================================================\n")
-            return "rag_query"
-        
-        # 1. Code Help (only when NOT referencing uploaded documents)
-        code_indicators = ["viết code", "write code", "debug", "lỗi code", "fix code",
-                          "code mẫu", "sample code", "implement", "lập trình"]
-        # Broader code indicators - only used when NO documents are attached
-        broad_code_indicators = ["code", "python", "java", "javascript", "function",
-                                 "class", "def ", "import ", "typescript"]
-        
-        if any(indicator in question_lower for indicator in code_indicators):
-            # Explicit code-writing request → always code_help
-            print(f"✅ Intent: CODE_HELP (rule-based: explicit code keywords)")
-            print(f"================================================\n")
-            return "code_help"
-        
-        if not has_documents and any(indicator in question_lower for indicator in broad_code_indicators):
-            # Broad code keywords only trigger code_help when NO documents
-            print(f"✅ Intent: CODE_HELP (rule-based: code keywords, no docs)")
-            print(f"================================================\n")
-            return "code_help"
-        
-        # 2. Data Analysis (only when query clearly targets a dataset/file)
-        strong_data_indicators = [
-            "phân tích dữ liệu", "analyze data", "csv", "excel", "dataframe",
-            "dataset", "dữ liệu trong file", "cột", "hàng", "groupby", "pivot"
-        ]
-        has_strong_data_signal = any(indicator in question_lower for indicator in strong_data_indicators)
-        has_generic_data_signal = any(indicator in question_lower for indicator in ["biểu đồ", "thống kê", "doanh thu"])
 
-        if has_strong_data_signal:
-            print(f"✅ Intent: DATA_ANALYSIS (rule-based: data keywords)")
-            print(f"================================================\n")
-            return "data_analysis"
-
-        # Generic chart/stat questions should be answered by model knowledge
-        if has_generic_data_signal:
-            print(f"✅ Intent: DIRECT_CHAT (rule-based: generic chart/stat knowledge)")
+        if not question_text:
+            print("⚠️ Empty question - defaulting to direct_chat")
             print(f"================================================\n")
             return "direct_chat"
-        
-        # 3. Math Calculation (obvious - contains calculation)
-        if any(op in question for op in ["+", "-", "*", "/", "×"]) and any(c.isdigit() for c in question):
-            print(f"✅ Intent: HOMEWORK_SOLVER (rule-based: math operators)")
-            print(f"================================================\n")
-            return "homework_solver"
-        
-        # 4. If user has documents and uses broad code keywords, it's likely a RAG query
-        # about code files (e.g., "giải thích đoạn code python trong file")
-        if has_documents and document_count > 0:
-            if any(indicator in question_lower for indicator in broad_code_indicators):
-                print(f"✅ Intent: RAG_QUERY (rule-based: code keywords + has docs → query about code files)")
-                print(f"================================================\n")
-                return "rag_query"
-        
-        # ========================================
-        # PHASE 2: LLM-BASED (Ambiguous Cases)
-        # ========================================
-        
-        print(f"⚡ Not obvious - using LLM classification...")
-        llm_intent = self._classify_with_llm(question, has_documents, document_count)
-        print(f"✅ Intent: {llm_intent.upper()} (LLM-based)")
+
+        print("⚡ Using LLM classification with context...")
+        llm_intent = self._classify_with_llm(
+            question=question_text,
+            has_documents=has_documents,
+            document_count=document_count,
+            chat_history=chat_history,
+            source_metadata=source_metadata,
+            has_tabular_data=has_tabular_data,
+        )
+        print(f"✅ Intent: {llm_intent.upper()} (LLM-first)")
         print(f"================================================\n")
         return llm_intent
     
@@ -276,7 +82,10 @@ class IntentClassifier:
         self,
         question: str,
         has_documents: bool,
-        document_count: int
+        document_count: int,
+        chat_history: Optional[List[Dict[str, Any]]] = None,
+        source_metadata: Optional[List[Dict[str, Any]]] = None,
+        has_tabular_data: bool = False,
     ) -> str:
         """
         Use LLM (Gemini Flash) to classify intent for ambiguous cases
@@ -285,80 +94,76 @@ class IntentClassifier:
             Intent name
         """
         # Build prompt with context
-        doc_context = ""
         if has_documents and document_count > 0:
-            doc_context = f"\n**QUAN TRỌNG**: Người dùng ĐÃ UPLOAD {document_count} tài liệu."
+            doc_context = f"Người dùng ĐÃ upload {document_count} tài liệu."
         else:
-            doc_context = "\n**QUAN TRỌNG**: Người dùng CHƯA UPLOAD tài liệu nào."
-        
+            doc_context = "Người dùng CHƯA upload tài liệu nào."
+
+        has_image_source = self._has_image_source_metadata(source_metadata)
+        history_hint = self._build_history_hint(chat_history)
+        source_hint = self._build_source_hint(source_metadata, has_image_source)
+
         system_prompt = f"""Bạn là Intent Classifier thông minh. Phân loại câu hỏi vào ĐÚNG 1 intent.
 
-{doc_context}
+NGỮ CẢNH HIỆN TẠI:
+- {doc_context}
+- {source_hint}
+- Có file dữ liệu dạng bảng (CSV/XLSX): {has_tabular_data}
+- Lịch sử gần đây (tóm tắt ngắn): {history_hint}
+
+YÊU CẦU:
+- Ưu tiên hiểu ý nghĩa câu hỏi dựa trên ngữ cảnh, KHÔNG dựa vào từ khóa đơn lẻ.
+- Nếu có tham chiếu như "này", "đó", "trong hình", hãy dùng lịch sử/ngữ cảnh để hiểu đúng đối tượng.
+- Chỉ được chọn 1 trong: qa / computation / analysis.
+
+⚠️ QUY TẮC CHỐNG NHẦM (RẤT QUAN TRỌNG):
+- Nếu có nguồn là HÌNH ẢNH hoặc câu hỏi nói "trong hình/ảnh", hầu hết trường hợp là hỏi mô tả/nhận diện nội dung → ưu tiên **qa**.
+- Không được chọn **analysis** chỉ vì xuất hiện từ như "hàng", "cột", "bảng" nếu KHÔNG có file dữ liệu bảng.
+- **analysis KHÔNG chỉ dành cho CSV/XLSX**. Có 2 nhóm use-case hợp lệ:
+  (A) **Data analysis (tabular)**: Có file CSV/XLSX và yêu cầu thống kê/nhóm/pivot/biểu đồ, kết quả định lượng.
+  (B) **Document analysis (report/code/pdf/docx)**: Có tài liệu/ảnh OCR và yêu cầu phân tích/tổng hợp/so sánh/kết luận từ nội dung tài liệu (không nhất thiết có bảng).
+- Chỉ chọn **analysis** khi yêu cầu thật sự là “phân tích/tổng hợp/so sánh/kết luận” (không phải hỏi định nghĩa đơn giản hay nhận diện vật thể).
+- Nếu người dùng chỉ xin **công thức/định nghĩa/quy tắc** (vd: "công thức tính tỉ số phần trăm", "công thức đạo hàm", "quy tắc Bayes là gì")
+  mà KHÔNG đưa số liệu cụ thể và KHÔNG yêu cầu ra kết quả số → ưu tiên **qa** (không phải computation).
+- Nếu câu hỏi vừa có tài liệu/ảnh đính kèm vừa có từ khóa "hàng/cột", nhưng mục tiêu là nhận diện/mô tả nội dung trong tài liệu/ảnh → vẫn là **qa**.
 
 📋 CÁC INTENT:
 
-1. **homework_solver** - Giải toán, bài tập, phương trình
-   - Ví dụ: "Giải phương trình x² + 2x = 0", "đạo hàm của 3x", "tích phân của x²"
-   - Dấu hiệu: Có công thức toán, biến số (x, y), phép tính, đạo hàm, tích phân
-   - ✅ Luôn dùng cho câu hỏi TOÁN, KHÔNG dùng RAG kể cả khi có tài liệu
+1. **qa** - Hỏi kiến thức, giải thích, tóm tắt, hỏi nội dung tài liệu/ảnh, sinh code
+    - Ví dụ: "OOP là gì?", "Tóm tắt file này", "Theo tài liệu, CICD là gì?", "Viết code Python"
+    - Dấu hiệu: hỏi khái niệm, giải thích, tóm tắt, hoặc hỏi nội dung trong tài liệu/ảnh
 
-2. **code_help** - Lập trình, viết code, debug
-   - Ví dụ: "Viết code Python sắp xếp", "Debug lỗi này", "Tạo function tính tổng"
-   - Dấu hiệu: Có từ "code", "function", "class", "debug", tên ngôn ngữ
-   - ✅ Luôn dùng cho câu hỏi LẬP TRÌNH
+2. **computation** - Yêu cầu tính toán ra kết quả số, giải bài tập có công thức
+    - Ví dụ: "Tính sai số mẫu", "Giải bài 5.12", "Tính xác suất/diện tích"
+    - Dấu hiệu: cần ra con số cuối cùng, có biến số/công thức/phép tính
 
-3. **direct_chat** - Kiến thức chung, giải thích khái niệm, trò chuyện
-   - Ví dụ: "OOP là gì?", "Sắp xếp nổi bọt hoạt động thế nào?", "Giải thích AI"
-   - Dấu hiệu: Hỏi "là gì", "làm thế nào", kiến thức tổng quát
-   - ✅ Dùng pre-trained knowledge, KHÔNG dùng RAG
-
-4. **rag_query** - Hỏi VỀ tài liệu đã upload (CHỈ KHI có tài liệu)
-   - Ví dụ: "Theo tài liệu, CICD là gì?", "File nói gì về Docker?", "Trong tài liệu có thông tin về RAG?"
-   - Dấu hiệu: 
-     * Có cụm "theo tài liệu", "trong file", "file này", "tài liệu nói"
-     * HOẶC hỏi thông tin CỤ THỂ có trong tài liệu đã upload
-   - ⚠️ CHỈ dùng nếu người dùng ĐÃ UPLOAD tài liệu
-
-5. **summarization** - Tóm tắt tài liệu
-   - Ví dụ: "Tóm tắt file này", "File nói về gì?", "Tổng hợp nội dung chính"
-   - Dấu hiệu: Có "tóm tắt", "nói về gì", "nội dung chính"
-   - ⚠️ CHỈ dùng nếu người dùng ĐÃ UPLOAD tài liệu
-
-6. **data_analysis** - Phân tích dữ liệu CSV/Excel
-   - Ví dụ: "Phân tích doanh thu", "Tính trung bình cột A", "Tạo biểu đồ"
-    - Dấu hiệu: "phân tích dữ liệu", "csv", "excel", "dataframe", "cột", "hàng"
-    - ⚠️ Nếu KHÔNG có file: câu hỏi kiến thức chung về biểu đồ/statistics phải là direct_chat
+3. **analysis** - Phân tích/tổng hợp/so sánh/kết luận từ tài liệu hoặc dữ liệu (CSV/Excel hoặc report/pdf/docx/code)
+    - Ví dụ: "Phân tích doanh thu theo tháng", "Thống kê tỷ lệ", "So sánh xu hướng"
+    - Dấu hiệu: cần phân tích dữ liệu/đồ thị, thống kê mô tả, xu hướng
 
 🎯 LOGIC QUYẾT ĐỊNH:
 
-**Bước 1**: Kiểm tra LOẠI câu hỏi
-- Toán học? → homework_solver
-- Lập trình? → code_help  
-- Kiến thức chung? → direct_chat
-
-**Bước 2**: Nếu CÓ tài liệu, kiểm tra có MUỐN dùng tài liệu?
-- "tài liệu này", "file này", "theo file" → rag_query hoặc summarization
-- Câu hỏi chung (OOP là gì, đạo hàm?) → direct_chat (KHÔNG dùng RAG)
-
-**Bước 3**: Nếu KHÔNG có tài liệu
-- "tài liệu này nói về gì?" → direct_chat (vì không có tài liệu để hỏi)
-- "hãy liệt kê các loại biểu đồ thường dùng" → direct_chat (kiến thức chung)
+**Bước 1**: Nếu câu hỏi yêu cầu ra kết quả số cụ thể → computation
+**Bước 2**: Nếu câu hỏi là phân tích/tổng hợp/so sánh/kết luận từ (a) file CSV/XLSX hoặc (b) nội dung tài liệu/report/code/pdf/docx → analysis
+**Bước 3**: Còn lại → qa
 
 YÊU CẦU:
-- Trả lời CHỈ TÊN INTENT (homework_solver/code_help/direct_chat/rag_query/summarization/data_analysis)
-- KHÔNG giải thích, KHÔNG thêm text khác
-- Ưu tiên: homework_solver > code_help > direct_chat > rag_query"""
+- Trả lời CHỈ TÊN INTENT (qa/computation/analysis)
+- KHÔNG giải thích, KHÔNG thêm text khác"""
 
         user_prompt = f"""Câu hỏi: "{question}"
 
 Intent:"""
 
         cache_key = llm_cache.build_key(
-            "intent_classifier_v1",
+            "intent_classifier_v2",
             {
                 "question": question.strip().lower(),
                 "has_documents": has_documents,
                 "document_count": int(document_count),
+                "history_tail": self._build_history_cache_key(chat_history),
+                "has_image_source": has_image_source,
+                "has_tabular_data": bool(has_tabular_data),
             },
         )
         cached_intent = llm_cache.get(cache_key)
@@ -381,7 +186,7 @@ Intent:"""
             intent = response.strip().lower()
             
             # Validate intent
-            valid_intents = ["homework_solver", "code_help", "direct_chat", "rag_query", "summarization", "data_analysis", "question_generation"]
+            valid_intents = ["qa", "computation", "analysis"]
             
             if intent in valid_intents:
                 llm_cache.set(cache_key, intent)
@@ -393,14 +198,81 @@ Intent:"""
                         llm_cache.set(cache_key, valid_intent)
                         return valid_intent
                 
-                # Last resort: default to direct_chat
-                print(f"⚠️ LLM returned invalid intent '{intent}', defaulting to direct_chat")
-                return "direct_chat"
+                # Last resort: default to qa
+                print(f"⚠️ LLM returned invalid intent '{intent}', defaulting to qa")
+                return "qa"
         
         except Exception as e:
             print(f"❌ LLM classification error: {e}")
-            # Fallback to rule-based
+            # Fallback to minimal rule-based
             return self._classify_fallback(question, has_documents, document_count)
+
+    def _build_history_hint(
+        self,
+        chat_history: Optional[List[Dict[str, Any]]],
+        max_messages: int = 6,
+        max_chars: int = 800
+    ) -> str:
+        if not chat_history:
+            return "Không có"
+
+        recent = chat_history[-max_messages:]
+        parts = []
+        for msg in recent:
+            role = "User" if msg.get("role") == "user" else "Assistant"
+            content = (msg.get("content") or "").strip()
+            if len(content) > 240:
+                content = content[:240] + "..."
+            parts.append(f"{role}: {content}")
+
+        text = " | ".join(parts)
+        if len(text) > max_chars:
+            text = text[:max_chars] + "..."
+        return text
+
+    def _build_history_cache_key(
+        self,
+        chat_history: Optional[List[Dict[str, Any]]]
+    ) -> str:
+        if not chat_history:
+            return ""
+        recent = chat_history[-4:]
+        parts = []
+        for msg in recent:
+            role = msg.get("role") or ""
+            content = (msg.get("content") or "").strip()
+            if len(content) > 120:
+                content = content[:120]
+            parts.append(f"{role}:{content}")
+        return " | ".join(parts)
+
+    def _has_image_source_metadata(
+        self,
+        source_metadata: Optional[List[Dict[str, Any]]]
+    ) -> bool:
+        if not source_metadata:
+            return False
+        image_exts = (".png", ".jpg", ".jpeg", ".webp", ".heic")
+        for source in source_metadata:
+            mime_type = (source.get("mime_type") or "").lower()
+            file_name = (source.get("file_name") or "").lower()
+            if mime_type.startswith("image/") or file_name.endswith(image_exts):
+                return True
+        return False
+
+    def _build_source_hint(
+        self,
+        source_metadata: Optional[List[Dict[str, Any]]],
+        has_image_source: bool
+    ) -> str:
+        if not source_metadata:
+            return "Không có nguồn đính kèm"
+        file_names = []
+        for source in source_metadata[:3]:
+            name = source.get("file_name") or source.get("source_id") or "unknown"
+            file_names.append(name)
+        file_list = ", ".join(file_names) if file_names else "không rõ"
+        return f"Có {len(source_metadata)} nguồn | hình ảnh={has_image_source} | ví dụ: {file_list}"
     
     def _classify_fallback(
         self,
@@ -414,40 +286,12 @@ Intent:"""
         """
         question_lower = question.lower()
         
-        # Check for obvious patterns
-        if any(kw in question_lower for kw in ["giải", "tính", "phương trình", "x =", "đạo hàm", "tích phân"]):
-            return "homework_solver"
-        
-        # Document reference check BEFORE code keywords
-        doc_ref_keywords = [
-            "theo tài liệu", "trong file", "file này", "tài liệu này", "file trên",
-            "phân tích file", "xem file", "đọc file", "review file",
-            "file vừa", "file mới", "file đã upload", "nội dung file"
-        ]
-        if has_documents and any(kw in question_lower for kw in doc_ref_keywords):
-            if any(kw in question_lower for kw in ["tóm tắt", "summary", "nội dung chính", "tổng hợp", "nói về gì", "từng file", "mỗi file"]):
-                return "summarization"
-            return "rag_query"
-        
-        # Code keywords only when NOT referencing documents
-        if any(kw in question_lower for kw in ["viết code", "write code", "debug", "lỗi code", "fix code"]):
-            return "code_help"
-        
-        if not has_documents and any(kw in question_lower for kw in ["code", "function", "class", "python", "java", "javascript"]):
-            return "code_help"
-        
-        # Nếu có tài liệu đính kèm
-        if has_documents:
-            if any(kw in question_lower for kw in ["tóm tắt", "summary", "nội dung chính", "tổng hợp", "nói về gì", "từng file", "mỗi file"]):
-                return "summarization"
-            # When user has docs and uses code keywords, likely asking about code files
-            if any(kw in question_lower for kw in ["code", "function", "class", "python", "java", "javascript"]):
-                return "rag_query"
-            # Có tài liệu nhưng câu hỏi chung -> vẫn trả lời trực tiếp theo kiến thức model
-            return "direct_chat"
-        
-        # Default
-        return "direct_chat"
+        # Minimal fallback: avoid heavy keyword routing
+        if any(token in question_lower for token in ["phân tích", "thống kê", "analysis", "statistics"]):
+            return "analysis"
+        if any(token in question_lower for token in ["tính", "calculate", "giải", "phương trình"]):
+            return "computation"
+        return "qa"
     
     def _has_keywords(self, text: str, keywords: List[str]) -> bool:
         """Check if text contains any of the keywords"""

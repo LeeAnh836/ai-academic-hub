@@ -66,51 +66,37 @@ class AIOrchestrator:
             intent = self.intent_classifier.classify(
                 question=question,
                 has_documents=has_docs,
-                document_count=len(document_ids) if document_ids else 0
+                document_count=len(document_ids) if document_ids else 0,
+                chat_history=session_history,
+                source_metadata=None,
             )
             
             print(f"🎯 Intent: {intent} | Has docs: {has_docs} | Question: {question[:50]}...")
             
             # 2. Route to appropriate handler
-            if intent == "direct_chat" or intent == "code_help":
-                result = await self.handle_direct_chat(
-                    question=question,
-                    user_id=user_id,
-                    document_ids=document_ids,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    session_history=session_history
-                )
-            
-            elif intent == "rag_query":
-                result = await self.handle_rag_query(
-                    question=question,
-                    user_id=user_id,
-                    document_ids=document_ids,
-                    top_k=top_k,
-                    score_threshold=score_threshold,
-                    temperature=temperature,
-                    max_tokens=max_tokens
-                )
-            
-            elif intent == "summarization":
-                result = await self.handle_summarization(
-                    user_id=user_id,
-                    document_ids=document_ids,
-                    temperature=temperature,
-                    max_tokens=max_tokens
-                )
-            
-            elif intent == "question_generation":
-                result = await self.handle_question_generation(
-                    question=question,
-                    user_id=user_id,
-                    document_ids=document_ids,
-                    top_k=top_k,
-                    temperature=temperature
-                )
-            
-            elif intent == "homework_solver":
+            if intent == "qa":
+                if has_docs:
+                    result = await self.handle_rag_query(
+                        question=question,
+                        user_id=user_id,
+                        document_ids=document_ids,
+                        top_k=top_k,
+                        score_threshold=score_threshold,
+                        temperature=temperature,
+                        max_tokens=max_tokens
+                    )
+                else:
+                    result = await self.handle_direct_chat(
+                        question=question,
+                        user_id=user_id,
+                        document_ids=document_ids,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        session_history=session_history
+                    )
+
+            elif intent == "computation":
+                # Use homework-style reasoning for computation requests
                 result = await self.handle_homework(
                     question=question,
                     user_id=user_id,
@@ -118,7 +104,28 @@ class AIOrchestrator:
                     temperature=temperature,
                     max_tokens=max_tokens
                 )
-            
+
+            elif intent == "analysis":
+                if has_docs:
+                    result = await self.handle_rag_query(
+                        question=question,
+                        user_id=user_id,
+                        document_ids=document_ids,
+                        top_k=top_k,
+                        score_threshold=score_threshold,
+                        temperature=temperature,
+                        max_tokens=max_tokens
+                    )
+                else:
+                    result = await self.handle_direct_chat(
+                        question=question,
+                        user_id=user_id,
+                        document_ids=document_ids,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        session_history=session_history
+                    )
+
             else:
                 # Fallback to direct chat
                 result = await self.handle_direct_chat(

@@ -1,85 +1,302 @@
-﻿# Báo Cáo Kiến Trúc Hệ Thống FE-BE-AI và Cơ Chế Vận Hành RAG
+# Báo Cáo Kiến Trúc Hệ Thống FE-BE-AI và Lõi Mô Hình RAG (Code-Verified)
 
-Tài liệu này trình bày lại toàn bộ kiến trúc của hệ thống theo một mạch liền xuyên suốt, bắt đầu từ bức tranh tổng quan giữa Frontend, Backend và AI Service, sau đó đi sâu vào quy trình xử lý tài liệu của AI, nơi file được lưu trữ, cách file được đọc theo từng định dạng, cách chunk và embedding được tạo, cơ chế điều phối mô hình, và cấu trúc RAG đang vận hành thực tế trong dự án. Mục tiêu là để người đọc có thể hiểu hệ thống như một dòng chảy kỹ thuật thống nhất, thay vì nhìn từng mảnh rời rạc.
+Tài liệu này được viết lại dựa trên việc rà soát trực tiếp code trong toàn bộ dự án ở 3 lớp Frontend, Backend, AI Service và lớp hạ tầng Docker. Mục tiêu là mô tả hệ thống như một dòng chảy thống nhất, tập trung sâu vào lõi mô hình, luồng hoạt động của mô hình, cơ chế fallback và nơi dữ liệu thực sự được lưu trữ trong vận hành hiện tại.
 
-## Tổng quan kiến trúc FE, BE và AI trong hệ thống hiện tại
+## Tổng quan kiến trúc FE, BE, AI và hạ tầng
 
-Ở lớp giao diện người dùng, Frontend được xây dựng bằng React kết hợp TypeScript và Vite, đóng vai trò là điểm chạm duy nhất giữa người dùng và nền tảng. Người dùng đăng nhập, quản lý tài liệu, mở phiên chat và gửi câu hỏi ngay trên giao diện này. Frontend không xử lý AI trực tiếp mà tập trung vào trải nghiệm, điều phối tương tác và gửi request HTTP có xác thực JWT về Backend.
+Frontend là lớp giao diện React + TypeScript, chịu trách nhiệm tương tác người dùng, quản lý phiên chat, upload tài liệu, hiển thị markdown kết quả AI và điều hướng tới trang preview tài liệu theo nguồn trích dẫn. Frontend không chạy AI trực tiếp, mà luôn gọi backend qua HTTP API.
 
-Backend là lớp điều phối nghiệp vụ trung tâm, được xây dựng bằng FastAPI. Mọi thao tác mang tính nghiệp vụ như xác thực người dùng, phân quyền, quản lý phiên chat, quản lý metadata tài liệu, thống kê sử dụng và lưu lịch sử hội thoại đều nằm ở lớp này. Khi có thao tác liên quan tới AI, Backend không nhúng logic suy luận phức tạp ngay trong mình mà gọi sang AI Service qua internal HTTP. Thiết kế tách lớp này giúp backend giữ vai trò “hệ điều hành nghiệp vụ”, còn AI Service giữ vai trò “động cơ suy luận và truy xuất tri thức”.
+Backend là lớp điều phối nghiệp vụ trung tâm bằng FastAPI. Backend xử lý xác thực, phiên chat, metadata tài liệu, vòng đời tài liệu, lưu lịch sử chat và gọi nội bộ sang AI Service để xử lý AI. Backend cũng là lớp gắn ngữ cảnh hội thoại, chuẩn hóa tài liệu theo canonical ID, và quản lý nguồn tri thức trong Mongo.
 
-AI Service là microservice chuyên xử lý các tác vụ AI: đọc và chuẩn hóa tài liệu, OCR ảnh/PDF scan, cắt chunk, tạo embedding, lưu vector vào Qdrant, phân loại intent, điều phối multi-agent và sinh câu trả lời theo cơ chế RAG. Vì được tách riêng thành service độc lập, AI có thể mở rộng hoặc tối ưu mà không làm xáo trộn lớp nghiệp vụ của backend.
+AI Service là microservice FastAPI độc lập cho toàn bộ tác vụ AI gồm đọc tài liệu nhiều định dạng, OCR ảnh/PDF scan, chunking, embedding, retrieval, rerank, corrective RAG, đa-agent orchestration và sinh câu trả lời.
 
-Bên dưới ba lớp FE, BE, AI là các thành phần hạ tầng chuyên biệt. MinIO lưu file gốc theo kiểu object storage, PostgreSQL lưu metadata quan hệ và lịch sử nghiệp vụ, Qdrant lưu vector để tìm kiếm ngữ nghĩa, Redis giữ memory và cache cho các bước hỗ trợ như hội thoại và helper calls, còn Neo4j được dùng khi bật GraphRAG để lưu quan hệ thực thể. Cách chia lớp theo trách nhiệm này giúp hệ thống vừa rõ ràng vừa dễ kiểm soát chi phí vận hành.
+Hạ tầng chạy qua docker-compose gồm:
+- PostgreSQL cho dữ liệu quan hệ nghiệp vụ
+- MongoDB cho chat history source-of-truth
+- Redis cho token blacklist và cache helper LLM
+- MinIO cho file gốc dạng object storage
+- Qdrant cho vector retrieval
+- Neo4j là tùy chọn khi bật GraphRAG
 
-## Luồng xử lý tài liệu từ lúc upload tới lúc sẵn sàng truy vấn
+## Lõi mô hình trong AI Service
 
-Khi người dùng upload tài liệu từ Frontend, request đi vào endpoint upload của Backend. Ở đây backend kiểm tra MIME type, extension và giới hạn dung lượng tối đa 20MB trước khi cho đi tiếp. Ngay sau đó backend đọc bytes của file để tạo mã băm SHA256, vì hash này là chìa khóa cho cơ chế chống xử lý trùng.
+### 1) ModelManager: bộ não điều phối model và provider
 
-Nếu backend tìm thấy một tài liệu đã xử lý xong trước đó của cùng người dùng có cùng content hash, backend sẽ tái sử dụng tài nguyên đã có bằng cách tạo một Document mới nhưng trỏ canonical_document_id về bản gốc và tái sử dụng file_path. Cách làm này cho phép bỏ qua OCR, chunking và embedding, tức là cắt mạnh phần tiêu tốn quota. Một điểm quan trọng trong code hiện tại là ảnh được xử lý theo hướng bảo toàn danh tính nguồn trích dẫn nên không đi theo nhánh dedup giống tài liệu text thông thường.
+ModelManager là điểm quyết định provider và model theo task_type và complexity.
 
-Nếu không có bản trùng, backend upload file lên MinIO. Object name được tổ chức theo cấu trúc user_id/uuid.ext, còn file_path lưu trong database theo dạng bucket/object_name để luôn truy vết lại được file vật lý. Sau khi upload xong, backend tạo bản ghi Document ở PostgreSQL với trạng thái pending, rồi gắn canonical_document_id bằng chính id của document mới.
+Các nhóm route chính hiện tại:
+- Nhóm helper/intermediate task như intent classification, query rewrite, corrective RAG, rerank, document map ưu tiên Groq trước để tối ưu chi phí/độ trễ.
+- Nhóm trả lời nặng như rag_query, summarization ưu tiên Gemini Flash/Pro và Mistral theo độ phức tạp.
+- Nhóm code_help, homework_solver, data_analysis đổi thứ tự theo độ khó.
 
-Từ thời điểm đó, backend không bắt người dùng chờ toàn bộ pipeline AI hoàn tất. Thay vào đó, backend tạo background task để xử lý bất đồng bộ. Task này mở DB session riêng, kéo file gốc từ MinIO, rồi gửi multipart request sang AI Service tại endpoint xử lý tài liệu. Request này chứa file bytes, document_id, user_id và metadata nghiệp vụ như title, category, tags.
+Cơ chế fallback và chịu lỗi của ModelManager:
+- Fallback chain đa provider khi lỗi sinh text.
+- Theo dõi trạng thái rate-limit theo provider và thời điểm reset.
+- Gemini hỗ trợ nhiều API key theo round-robin.
+- Key Gemini invalid/expired bị loại vĩnh viễn khỏi rotation.
+- Lỗi 503 Gemini sẽ cooldown ngắn theo key rồi xoay key khác.
+- Trường hợp hard-limit theo model (ví dụ model chạm limit 0) sẽ cooldown theo model thay vì đốt hết key.
+- OCR Vision cũng dùng chung tinh thần xoay key/fallback qua generate_text_from_image.
 
-Khi AI Service xử lý xong, kết quả trả về gồm danh sách chunk đã chuẩn hóa cùng token_count và metadata từng chunk. Backend nhận danh sách này rồi ghi vào bảng document_chunks, đồng thời ghi bảng document_embeddings dưới dạng metadata trỏ tới qdrant_point_id. Cuối cùng backend cập nhật document thành completed và đánh dấu is_processed là true.
+### 2) Intent Classifier: phân luồng ý định theo mô hình lai
 
-## File được lưu ở đâu và mỗi nơi giữ vai trò gì
+Intent classifier dùng kết hợp:
+- Rule-based cho tình huống rõ ràng, ưu tiên tốc độ.
+- LLM-based cho tình huống mơ hồ, có cache helper để tiết kiệm token.
 
-Trong kiến trúc này, file gốc luôn nằm ở MinIO, vì đây là lớp lưu trữ object bền vững cho dữ liệu nhị phân. PostgreSQL không giữ file gốc mà chỉ giữ “hồ sơ quản trị” của tài liệu, bao gồm tên file, đường dẫn MinIO, hash nội dung, trạng thái xử lý, metadata nghiệp vụ, thông tin canonical và các bản ghi chunk liên quan.
+Các intent chính gồm direct_chat, rag_query, summarization, question_generation, data_analysis, homework_solver, code_help.
 
-Qdrant là nơi lưu vector thật sự để phục vụ truy vấn semantic search tốc độ cao. Trong mỗi point của Qdrant, hệ thống lưu vector cùng payload giàu ngữ cảnh như document_id, chunk_id, chunk_text, chunk_index, user_id, file_name, title, category, tags và cờ nhận diện OCR ảnh. Điều này giúp retrieval vừa tìm đúng theo ngữ nghĩa vừa giữ đủ thông tin để truy vết nguồn.
+Tầng orchestrator còn có guard quan trọng:
+- Nếu có tài liệu và câu hỏi dạng tham chiếu deictic như file này, hình này, this file thì ép route về nhánh document-grounded (rag_query hoặc summarization).
+- Nếu không có tài liệu mà intent thuộc nhóm phụ thuộc tài liệu thì ép về direct_chat để tránh trả lời lạc sang lỗi thiếu file.
 
-Khi bật GraphRAG, Neo4j giữ lớp tri thức dạng đồ thị, gồm Document, Chunk, Entity và các quan hệ liên kết. Redis giữ ngữ cảnh hội thoại đa phiên và cache cho các bước helper để giảm số lần gọi model ở những tác vụ lặp.
+### 3) Prompt Preprocessor: chuẩn hóa các câu mơ hồ theo ngữ cảnh hội thoại
 
-## AI Service đọc file và trích xuất nội dung theo từng định dạng
+Prompt preprocessor xử lý các câu cực ngắn hoặc tham chiếu ngữ cảnh như có, được, những cái đó, cái này, above, those. Module này dùng memory context để phục hồi ý nghĩa trước khi intent classification và agent execution.
 
-Điểm quan trọng của pipeline AI là không đọc file theo một cách duy nhất. Service sẽ nhận bytes từ backend, ghi tạm ra file temp để các loader làm việc, sau đó chọn chiến lược đọc dựa theo MIME type và extension.
+### 4) Hệ multi-agent
 
-Với PDF có text, hệ thống dùng PyPDFLoader để trích xuất nội dung. Nhưng nếu tổng text lấy được quá ít, nhỏ hơn ngưỡng khoảng 150 ký tự, pipeline coi đó là PDF scan hoặc PDF ảnh. Khi đó mỗi trang được render thành ảnh JPEG bằng PyMuPDF ở độ phân giải 200 DPI rồi gửi sang Gemini Vision để OCR theo từng trang. Kết quả OCR của mỗi trang được đóng thành document đầu vào cho các bước sau.
+Master Orchestrator route request tới agent chuyên trách:
+- DocumentQAAgent cho RAG, summarization, question_generation từ tài liệu.
+- GeneralQAAgent cho câu hỏi kiến thức chung, code help, chat trực tiếp.
+- DataAnalysisAgent cho phân tích CSV/XLSX qua sinh và thực thi code pandas.
 
-Với ảnh độc lập như JPG, PNG, WebP hoặc HEIC, hệ thống gửi trực tiếp bytes ảnh vào luồng Vision OCR. Prompt OCR được thiết kế theo hướng số hóa tài liệu đầy đủ, bao gồm text, bảng, ký hiệu và mô tả hình minh họa nếu có. Trong trường hợp OCR thất bại hoàn toàn, pipeline vẫn tạo một placeholder document để tránh vỡ luồng xử lý.
+Trong luồng chat chính từ backend, AI request gửi kèm persisted_by_backend=true, nên orchestrator sẽ không ghi đúp transcript vào memory nội bộ.
 
-Với DOCX, hệ thống dùng Docx2txtLoader để lấy nội dung text. Với file mã nguồn, hệ thống đọc raw text rồi chọn text splitter theo ngôn ngữ lập trình tương ứng để hạn chế cắt ngang cấu trúc hàm hoặc class. Với CSV và XLSX, pipeline dùng pandas để đọc bảng rồi chuyển sang markdown table theo cụm dòng nhằm giữ ngữ nghĩa bảng dữ liệu. Với plain text hoặc định dạng còn lại, hệ thống đọc theo UTF-8 có cơ chế thay thế lỗi ký tự để không dừng pipeline.
+### 5) Memory và cache trong lõi mô hình
 
-Sau khi hoàn tất, file temp luôn được xóa để không tích lũy dữ liệu tạm trong container AI.
+- Memory Mongo trong backend là nguồn hội thoại chính (conversations, messages, message_source_refs, conversation_summaries, conversation_state, knowledge_sources).
+- AI memory manager vẫn tồn tại để fallback khi context request không mang đủ history.
+- LLM cache dùng Redis + in-memory fallback cho helper calls như classify, rewrite, CRAG evaluate.
 
-## Cơ chế chunking và chuẩn hóa nội dung trước khi embedding
+## Luồng ingest tài liệu từ upload đến index sẵn sàng truy vấn
 
-Chunking được cấu hình bằng RecursiveCharacterTextSplitter với chunk_size là 1000 ký tự và chunk_overlap là 200 ký tự. Các document đã được cắt sẵn từ trước, như một số nhánh code hoặc bảng, sẽ được đánh dấu pre_chunked để không bị tách lại. Các document cần tách mới sẽ được split theo thứ tự separator ưu tiên ngắt đoạn và ngắt dòng trước khi rơi xuống mức ký tự.
+### Bước 1: Upload từ Frontend
 
-Trước khi đưa đi embedding, từng chunk được chuẩn hóa lại thành định dạng có metadata header ngay trong nội dung, bao gồm filename, file_type và source. Nếu chunk đến từ OCR ảnh thì source được ghi theo hướng OCR/Vision, còn chunk đến từ file gốc thì source phản ánh luồng MinIO. Với chunk mã nguồn, phần body được đặt trong fenced code block đúng ngôn ngữ để bảo toàn ngữ cảnh khi retrieval và khi model đọc lại prompt.
+Frontend gọi endpoint upload của backend với file và metadata tùy chọn title/category/tags.
 
-Mỗi chunk khi đóng gói đều có chunk_index, chunk_text, chunk_metadata, document_id, user_id, file_name và token_count ước lượng theo quy tắc ký tự chia bốn. Cách lưu này làm cho luồng truy vết từ câu trả lời quay ngược về đoạn văn bản gốc luôn minh bạch.
+### Bước 2: Validate và hash ở Backend
 
-## Embedding được tạo như thế nào và lưu vào đâu
+Backend kiểm tra MIME/ext được hỗ trợ và giới hạn 20MB. Sau đó đọc bytes để tạo SHA-256 content_hash.
 
-Embedding service của AI dùng Cohere với model embed-multilingual-v3.0. Với dữ liệu tài liệu, hệ thống gọi input_type là search_document để sinh vector phù hợp ngữ cảnh index. Với câu hỏi người dùng, hệ thống dùng input_type là search_query để vector truy vấn đồng nhất với vector tài liệu trong không gian tìm kiếm. Kích thước vector được cấu hình 1024 chiều và được dùng thống nhất trong collection Qdrant.
+### Bước 3: Dedup theo người dùng và canonical hóa
 
-Sau khi embedding được tạo, AI Service upsert toàn bộ points vào Qdrant. Mỗi point có id riêng, vector và payload chứa metadata retrieval. Backend đồng thời lưu metadata embedding vào PostgreSQL để phục vụ quản trị vòng đời dữ liệu, trong khi vector thật chỉ nằm ở Qdrant. Thiết kế này giữ cho lớp nghiệp vụ có thể audit được dữ liệu mà không phải lưu vector nặng trong database quan hệ.
+Nếu là tài liệu không phải ảnh, backend tìm bản đã xử lý xong theo cùng user_id + content_hash + completed.
 
-## Phân luồng mô hình và cơ chế fallback trong AI Service
+Nếu trùng:
+- Tạo Document mới nhưng canonical_document_id trỏ về bản canonical.
+- Reuse file_path MinIO của bản gốc.
+- Đánh dấu is_processed=true và completed ngay, bỏ qua OCR/chunk/embedding.
 
-ModelManager là thành phần điều phối provider và model theo task_type và độ phức tạp. Với helper tasks như intent classification, query rewrite, rerank fallback hay corrective RAG, thứ tự ưu tiên thiên về tốc độ và chi phí thấp. Với các tác vụ trả lời RAG hoặc tóm tắt phức tạp, hệ thống ưu tiên model mạnh hơn trước rồi mới rơi về model rẻ hơn nếu cần. Với code_help hoặc data_analysis, route cũng thay đổi theo mức độ khó của câu hỏi.
+Nếu là ảnh:
+- Cố ý không dedup để giữ danh tính nguồn riêng cho trích dẫn.
+- Tên ảnh generic sẽ được chuẩn hóa tên mới để tránh đụng độ.
 
-Cơ chế chống gián đoạn được thiết kế hai lớp. Ở lớp thứ nhất, hệ thống theo dõi trạng thái rate-limit theo provider, nhận diện lỗi quota rồi tạm thời gắn cờ provider đó để tránh chọn lại ngay lập tức. Ở lớp thứ hai, nếu lần gọi hiện tại thất bại, hệ thống đi qua fallback chain sang provider kế tiếp. Riêng Gemini hỗ trợ nhiều API key theo cơ chế round-robin, đồng thời có theo dõi trạng thái giới hạn theo từng key để xoay vòng thông minh hơn. Riêng Groq có giới hạn max_tokens ở mức an toàn để giảm rủi ro chạm trần miễn phí.
+### Bước 4: Lưu file gốc lên MinIO
 
-Trong OCR đa phương thức, luồng Vision cũng thừa hưởng tinh thần fallback tương tự. Hệ thống thử lại nhiều lần với backoff và xoay key Gemini khi gặp tín hiệu quota, nhờ đó giảm xác suất thất bại cứng ở các tác vụ scan tài liệu nhiều trang.
+Backend upload object theo cấu trúc user_id/uuid.ext. Trong PostgreSQL lưu file_path ở dạng bucket/object_name để truy vết object vật lý.
 
-## Cấu trúc RAG thực tế đang chạy trong luồng chat
+### Bước 5: Tạo bản ghi document pending
 
-Luồng hỏi đáp chính hiện tại đi theo endpoint chat của backend. Frontend gửi câu hỏi vào phiên chat, backend lưu message người dùng, gom chat_history gần nhất, chuẩn hóa document_ids về canonical_document_id rồi gọi AI Service tại endpoint multi-agent. Đây là điểm rất quan trọng vì nó đảm bảo một tài liệu trùng nội dung vẫn truy vấn đúng bộ vector chuẩn đã index từ trước.
+Backend tạo Document mới với status pending, sau đó set canonical_document_id = chính id mới.
 
-Trong AI Service, Master Orchestrator điều phối chuỗi xử lý. Nếu request chưa mang đủ lịch sử hội thoại, orchestrator tự nạp thêm từ Redis memory để không mất ngữ cảnh. Sau đó Prompt Preprocessor xử lý những câu mơ hồ kiểu xác nhận ngắn hoặc tham chiếu ngữ cảnh. Intent classifier chạy theo mô hình lai rule trước, LLM sau, có cache để giảm helper token. Nếu người dùng có tài liệu đính kèm và câu hỏi mang tính chỉ định như “file này” hoặc “hình này”, orchestrator có logic ép route sang nhánh tài liệu để tránh trả lời trôi sang kiến thức chung.
+### Bước 6: Chạy background task không chặn người dùng
 
-Khi intent đi vào Document QA Agent, nhánh summarization và nhánh QA thường được tách rõ. Ở nhánh summarization, hệ thống không chỉ lấy top-k mà scroll toàn bộ chunk của các document được chọn, rồi chạy map-reduce. Map phase tóm tắt riêng từng tài liệu, reduce phase tổng hợp toàn cảnh. Nếu chất lượng summary có dấu hiệu quá ngắn hoặc cụt ý, quality guard sẽ kích hoạt retry với prompt chặt hơn hoặc provider khác.
+Backend tạo background task process_document_background, mở session DB riêng, tải file từ MinIO rồi gọi AI Service endpoint xử lý tài liệu dạng multipart.
 
-Ở nhánh QA thông thường, hệ thống phân tích độ phức tạp câu hỏi trước khi retrieval. Nếu Advanced RAG đang bật, pipeline sẽ đi qua query rewriting để tạo biến thể, có thể thêm step-back query và thậm chí decomposition cho multi-hop. Sau đó hệ thống chạy multi-query vector retrieval, hợp nhất kết quả, áp dụng BM25 rescoring để tăng trọng số từ khóa, rồi rerank lại bằng Cohere rerank hoặc fallback bằng LLM. Tiếp theo CRAG đánh giá độ đủ của context. Nếu chất lượng bị đánh giá là insufficient, pipeline sinh corrective query và thử truy xuất lại với ngưỡng linh hoạt hơn.
+### Bước 7: AI Service đọc và chuẩn hóa tài liệu theo định dạng
 
-Nếu Advanced RAG không khả dụng nhưng GraphRAG được bật, hệ thống dùng Hybrid RAG để phối hợp context vector từ Qdrant và context quan hệ từ Neo4j. Nếu cả hai lớp nâng cao không dùng được, pipeline rơi xuống vector-only retrieval trong Qdrant với filter user_id và document_ids. Khi semantic search không tìm thấy gì mà câu hỏi mang tính tham chiếu file đính kèm, hệ thống còn có reference fallback bằng cơ chế scroll để kéo các chunk đầu theo tài liệu, tránh trường hợp query ngắn chung chung nhưng người dùng thực sự đang hỏi nội dung trong file vừa chọn.
+Document service trong AI chọn chiến lược theo MIME/ext:
+- PDF text: dùng PyPDFLoader.
+- Nếu PDF text quá ít (ngưỡng nhỏ hơn khoảng 150 ký tự): coi như scan/image PDF, render mỗi trang bằng PyMuPDF 200 DPI rồi OCR bằng Gemini Vision.
+- Ảnh JPG/PNG/WebP/HEIC: OCR trực tiếp bằng Gemini Vision.
+- OCR có retry/backoff; nếu thất bại hoàn toàn vẫn tạo placeholder document để không vỡ pipeline.
+- DOCX: Docx2txtLoader.
+- Code file: đọc text và split theo ngôn ngữ lập trình tương ứng.
+- CSV/XLSX: dùng pandas đọc bảng, chuyển markdown table theo cụm dòng.
+- Text/định dạng còn lại: đọc UTF-8 có thay thế lỗi.
+- File temp luôn được xóa sau xử lý.
 
-Sau khi có context, agent xây prompt theo hướng grounding chặt, gắn thêm phần lịch sử hội thoại gần và chọn model theo độ phức tạp. Câu trả lời trả về kèm metadata như retrieval_mode, pipeline stages, số context đã dùng và doc_map để frontend liên kết nguồn trích dẫn đúng tài liệu.
+### Bước 8: Chunking và chuẩn hóa chunk
+
+Chunking dùng RecursiveCharacterTextSplitter với:
+- chunk_size = 1000
+- chunk_overlap = 200
+- length_function dựa trên token encoder (fallback char length nếu thiếu tokenizer)
+
+Chunk được chuẩn hóa thành nội dung có metadata header gồm filename, file_type, source. Chunk code được bọc fenced code block để giữ ngữ cảnh khi retrieval.
+
+### Bước 9: Embedding và upsert vector
+
+Embedding dùng Cohere embed-multilingual-v3.0:
+- input_type search_document cho index
+- vector_dimension 1024
+
+AI Service tạo chunk_id, upsert point vào Qdrant với payload gồm document_id, chunk_id, chunk_text, chunk_index, user_id, file_name, title, category, tags, is_image_ocr.
+
+### Bước 10: Backend lưu metadata chunk/embedding và finalize
+
+AI Service trả về danh sách chunk đã chuẩn hóa cho backend. Backend ghi:
+- document_chunks
+- document_embeddings (metadata trỏ qdrant_point_id)
+
+Sau cùng backend cập nhật document thành completed và is_processed=true.
+
+## Luồng hỏi đáp chat từ người dùng đến câu trả lời
+
+### Bước 1: Frontend gửi câu hỏi
+
+Frontend gọi endpoint ask theo session. Nếu có file đính kèm mới, frontend upload file trước, poll batch status, rồi mới gửi ask với document_ids.
+
+### Bước 2: Backend xử lý ngữ cảnh phiên chat
+
+Backend tại endpoint ask thực hiện:
+1. Lưu user message.
+2. Xác định document_ids sử dụng theo thứ tự ưu tiên:
+- Nếu request có document_ids (kể cả mảng rỗng): dùng explicit selection.
+- Nếu request không gửi document_ids: dùng context_documents đã lưu trong session.
+3. Chuẩn hóa document_ids sang canonical_document_id để đảm bảo truy vấn vào cùng bộ vector chuẩn.
+4. Nếu request không explicit doc_ids, backend đọc source catalog của conversation và parse filename mention hoặc id:prefix trong câu hỏi để override active source chính xác hơn.
+5. Upsert knowledge_sources trong Mongo từ document_ids đang dùng.
+6. Build context bundle từ Mongo gồm:
+- chat_history gần nhất
+- conversation_summary
+- source_ids
+- source_metadata
+7. Nếu câu hỏi mơ hồ kiểu tham chiếu khi có nhiều source và user chưa chọn rõ, backend trả 422 yêu cầu làm rõ nguồn.
+
+### Bước 3: Backend gọi AI Service multi-agent
+
+Backend gọi endpoint /api/agent/query với payload chứa:
+- query, user_id, session_id
+- document_ids đã canonical hóa
+- top_k, score_threshold, temperature, max_tokens
+- chat_history, conversation_summary
+- source_ids, source_metadata
+- trace_id
+- persisted_by_backend=true
+
+Backend có bước JSON-safe serialization để tránh lỗi kiểu datetime/UUID không serialize được.
+
+### Bước 4: AI Service orchestration
+
+Master Orchestrator trong AI Service chạy chuỗi:
+1. Nếu thiếu chat_history, tự nạp từ memory.
+2. Prompt preprocessing cho truy vấn mơ hồ.
+3. Intent classification theo hybrid rule + LLM.
+4. Guard ép route document-grounded cho câu deictic có tài liệu.
+5. Route tới agent phù hợp.
+
+### Bước 5: Nhánh Document QA (trọng tâm RAG)
+
+DocumentQAAgent thực thi theo 2 nhánh lớn:
+
+A. Nhánh summarization
+- Scroll toàn bộ chunk của các tài liệu được chọn, không dùng top-k semantic.
+- Map phase: tóm tắt từng tài liệu riêng.
+- Quality guard: nếu summary ngắn/cụt thì retry với prompt/provider khác.
+- Reduce phase: tổng hợp kết quả đa tài liệu.
+
+B. Nhánh QA thông thường
+1. Phân tích độ phức tạp câu hỏi.
+2. Nếu ENABLE_ADVANCED_RAG=true:
+- Query rewriting tạo nhiều biến thể.
+- Có step-back query cho câu hỏi vừa/phức tạp.
+- Multi-query vector retrieval và hợp nhất kết quả.
+- BM25 rescoring tăng trọng số từ khóa.
+- Reranking bằng Cohere rerank hoặc fallback LLM.
+- CRAG đánh giá đủ ngữ cảnh hay không.
+- Nếu insufficient thì tạo corrective query và truy xuất lại theo ngưỡng linh hoạt.
+- Nếu query đủ điều kiện multi-hop thì decomposition thành sub-queries rồi tổng hợp.
+3. Nếu Advanced RAG không dùng nhưng GraphRAG bật thì chạy Hybrid RAG (vector + graph).
+4. Nếu cả hai không dùng thì vector-only retrieval trên Qdrant.
+5. Nếu semantic retrieval rỗng mà query là dạng tham chiếu file này/hình này, bật reference fallback bằng scroll chunk đầu từ tài liệu đã chọn.
+6. Sinh câu trả lời grounding chặt với context + history + summary + source metadata.
+7. Tạo doc_map theo nhãn file_name | id:8 ký tự để frontend map citation chính xác khi trùng tên file.
+
+### Bước 6: Persist kết quả và trả về UI
+
+Backend nhận response từ AI Service, lưu assistant message, cập nhật usage stats, ghi source refs theo retrieved chunk vào Mongo, cập nhật summary hội thoại khi cần, rồi trả về frontend kèm contexts, doc_map, quota_info.
+
+Frontend render markdown, tự động biến citation dạng [file] thành link nội bộ preview tài liệu tương ứng qua doc_map.
+
+## Cấu trúc dữ liệu và nơi lưu trữ thực tế
+
+### MinIO
+
+Lưu file nhị phân gốc của tài liệu theo object storage. Đây là source-of-file chính.
+
+### PostgreSQL
+
+Lưu dữ liệu quan hệ nghiệp vụ:
+- documents (metadata, hash, canonical, trạng thái)
+- document_chunks
+- document_embeddings (metadata qdrant_point_id, không chứa vector nặng)
+- chat_sessions, chat_messages (fallback/compat)
+- ai_usage_history
+
+### Qdrant
+
+Lưu vector 1024 chiều và payload retrieval. Query luôn filter theo user_id và document_id để giữ isolation dữ liệu người dùng.
+
+### MongoDB
+
+Lưu source-of-truth cho hội thoại và nguồn tri thức:
+- conversations
+- messages
+- message_source_refs
+- conversation_summaries
+- conversation_state
+- knowledge_sources
+
+Mongo cũng giữ active_source_ids, source catalog, và quan hệ giữa message và nguồn trích dẫn.
+
+### Redis
+
+- Token blacklist cho auth backend.
+- LLM helper cache (intent/query rewrite/CRAG...) ở AI Service.
+
+### Neo4j (tùy chọn)
+
+Khi bật GraphRAG + Neo4j, hệ thống index Document/Chunk/Entity và quan hệ để phục vụ retrieval theo tri thức đồ thị.
+
+## Cơ chế fallback và chống gián đoạn vận hành
+
+Hệ thống có nhiều lớp fallback nối tiếp:
+- Provider/model fallback trong ModelManager theo task profile.
+- Gemini key rotation đa key và loại bỏ key invalid.
+- Cooldown theo key cho rate-limit, cooldown ngắn cho 503.
+- Cooldown theo model khi chạm hard-limit theo model.
+- OCR retry với backoff trong Vision pipeline.
+- Retrieval fallback hạ threshold khi thiếu kết quả.
+- CRAG corrective retrieval khi quality insufficient.
+- Reference fallback bằng scroll khi query deictic không match semantic.
+- Ambiguity guard ở backend để chặn trả lời nhầm nguồn khi nhiều nguồn đang active.
+
+## Các cấu hình quan trọng chi phối hành vi
+
+Ở AI Service:
+- ENABLE_ADVANCED_RAG (mặc định bật)
+- ENABLE_QUERY_REWRITING, ENABLE_BM25_RESCORING, ENABLE_RERANKING, ENABLE_CORRECTIVE_RAG
+- ENABLE_MULTI_HOP
+- ENABLE_GRAPH_RAG và ENABLE_NEO4J
+- CHUNK_SIZE=1000, CHUNK_OVERLAP=200
+- RAG_TOP_K, RAG_SCORE_THRESHOLD, RAG_MIN_SCORE_THRESHOLD
+- ENABLE_MULTI_AGENT, ENABLE_PROMPT_PREPROCESSING
+
+Ở Backend:
+- ENABLE_MONGO_CHAT_HISTORY (mặc định bật)
+- AI_SERVICE_URL cho internal call
+- MINIO_BUCKET_NAME, QDRANT_COLLECTION_NAME
+
+Ở deployment:
+- docker-compose hiện có PostgreSQL, MongoDB, Redis, MinIO, Qdrant, Backend, AI Service, Frontend.
 
 ## Kết luận vận hành
 
-Nhìn tổng thể, hệ thống này không phải mô hình “một API gọi một model rồi trả lời”, mà là chuỗi phối hợp nhiều lớp có kiểm soát trách nhiệm rõ ràng. Frontend tập trung trải nghiệm và luồng tương tác, Backend tập trung quản trị nghiệp vụ và vòng đời dữ liệu, còn AI Service tập trung trí tuệ xử lý tài liệu và suy luận. Ở chiều ingest, file gốc nằm ở MinIO, metadata nằm ở PostgreSQL, vector nằm ở Qdrant và quan hệ tri thức có thể mở rộng bằng Neo4j. Ở chiều truy vấn, multi-agent orchestration, model routing, advanced retrieval và fallback giúp hệ thống giữ được cân bằng giữa độ đúng tài liệu, độ ổn định và chi phí. Chính sự phân lớp này làm cho nền tảng vừa đủ linh hoạt để mở rộng, vừa đủ minh bạch để theo dõi và tối ưu vận hành theo thời gian.
+Kiến trúc hiện tại là mô hình phân lớp rõ ràng và thực dụng cho hệ RAG production:
+- Frontend tập trung UX và điều phối tương tác.
+- Backend quản trị nghiệp vụ, vòng đời tài liệu, ngữ cảnh hội thoại và điều phối gọi AI.
+- AI Service tập trung lõi mô hình: intent routing, multi-agent orchestration, advanced retrieval, model fallback và sinh câu trả lời grounded.
+
+Điểm mạnh kỹ thuật nổi bật của hệ thống là canonical dedup để tối ưu chi phí xử lý lặp, advanced RAG nhiều tầng (rewrite -> retrieve -> rerank -> CRAG), và quản trị nguồn trích dẫn xuyên suốt từ Qdrant/Mongo tới UI bằng doc_map để giữ tính truy vết minh bạch trong câu trả lời.

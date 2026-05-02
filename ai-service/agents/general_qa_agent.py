@@ -8,6 +8,7 @@ import logging
 from agents import BaseAgent
 from core.config import settings
 from services.query_complexity_analyzer import complexity_analyzer
+from services.computation_pipeline import computation_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,72 @@ class GeneralQAAgent(BaseAgent):
             
             # Get chat history for context continuity
             chat_history = context.get("chat_history", [])
+
+            intent = context.get("intent")
+            if intent in {"computation", "analysis"}:
+                # Guardrail: not every query containing "tính/công thức" should go through
+                # the computation pipeline. Only use tool+plan extraction when the user
+                # actually requests a numeric result or a concrete calculation.
+                if not self._should_use_computation_pipeline(query):
+                    logger.info("↩️ Intent suggests computation/analysis, but query is informational → direct QA")
+                    answer = await self._answer_direct(
+                        query=query,
+                        complexity=complexity_analyzer.analyze(query),
+                        intent="qa",
+                        chat_history=chat_history,
+                    )
+                    self.save_state(user_id, session_id, {"last_query": query, "tool_used": False})
+                    self.memory.set_context(user_id, session_id, "last_action", "general_qa")
+                    return {
+                        "answer": answer,
+                        "metadata": {
+                            "tool_used": False,
+                            "fallback_from": f"intent_{intent}",
+                            **self.build_quota_metadata(answer),
+                        },
+                    }
+
+                logger.info(f"🧮 Using computation pipeline for intent={intent}")
+                comp_result = computation_pipeline.run(
+                    query=query,
+                    contexts=None,
+                    intent=intent,
+                    chat_history=chat_history,
+                )
+                # If the computation pipeline can't extract a plan (common for
+                # general knowledge questions like "một năm có bao nhiêu ngày"),
+                # fall back to direct chat instead of returning a misleading error.
+                meta = comp_result.get("metadata") or {}
+                if meta.get("error") == "plan_extraction_failed":
+                    logger.info("↩️ Computation plan extraction failed → fallback to direct QA")
+                    answer = await self._answer_direct(
+                        query=query,
+                        complexity=complexity_analyzer.analyze(query),
+                        intent="qa",
+                        chat_history=chat_history,
+                    )
+                    tool_used = False
+                    tool_meta = {"tool_used": False, "fallback_from": "computation_pipeline"}
+                else:
+                    answer = comp_result.get("answer", "")
+                    tool_used = True
+                    tool_meta = {
+                        "tool_used": True,
+                        "model": "tool+llm",
+                        **(meta or {}),
+                    }
+                self.save_state(user_id, session_id, {
+                    "last_query": query,
+                    "tool_used": tool_used
+                })
+                self.memory.set_context(user_id, session_id, "last_action", "computation" if tool_used else "general_qa")
+                return {
+                    "answer": answer,
+                    "metadata": {
+                        **tool_meta,
+                        **self.build_quota_metadata(answer)
+                    }
+                }
             
             # Detect if tools are needed
             tool_needed = self._detect_tool_need(query)
@@ -123,6 +190,38 @@ class GeneralQAAgent(BaseAgent):
             return "weather"
         
         return None
+
+    def _should_use_computation_pipeline(self, query: str) -> bool:
+        """
+        Decide whether we should route to computation_pipeline for a general query.
+        We only do this when the user likely wants a computed numeric result.
+        """
+        q = (query or "").lower()
+        if not q.strip():
+            return False
+
+        # If the user explicitly asks for a formula/definition, do NOT run tool pipeline.
+        formula_markers = [
+            "công thức", "formula", "quy tắc", "định nghĩa",
+            "là gì", "what is", "define", "definition",
+        ]
+        if any(m in q for m in formula_markers):
+            # Unless they also provide concrete numbers / ask for a numeric result.
+            pass
+
+        numeric_markers = [
+            "bao nhiêu", "bằng bao nhiêu", "kết quả", "result",
+            "tính", "calculate", "solve",
+        ]
+        has_digits = any(ch.isdigit() for ch in q)
+        has_operator = any(op in q for op in ["+", "-", "*", "/", "=", "%"])
+
+        # Typical: "tính X khi a=.., b=.." or "bao nhiêu" + digits/operators.
+        if has_digits and (has_operator or any(m in q for m in numeric_markers)):
+            return True
+
+        # Without numbers/operators, treat it as informational.
+        return False
     
     async def _answer_with_tools(
         self,
@@ -167,9 +266,10 @@ class GeneralQAAgent(BaseAgent):
             
             # Detect request type: creative vs analytical
             request_type = self._detect_request_type(query)
+            is_code_request = self._is_code_request(query)
             
             # Dynamic system instruction based on complexity and type
-            system_instruction = self._get_system_prompt(complexity, request_type, intent)
+            system_instruction = self._get_system_prompt(complexity, request_type, intent, is_code_request)
             
             # Build conversation context from history
             history_prompt = self._build_history_prompt(chat_history)
@@ -230,6 +330,19 @@ class GeneralQAAgent(BaseAgent):
         ]
         
         return "creative" if any(kw in query_lower for kw in creative_keywords) else "analytical"
+
+    def _is_code_request(self, query: str) -> bool:
+        """
+        Detect if query is asking for code generation or debugging.
+        """
+        query_lower = query.lower()
+        code_keywords = [
+            "code", "viết code", "lập trình", "program",
+            "function", "class", "debug", "fix", "bug",
+            "python", "java", "javascript", "c#", "c++",
+            "typescript", "golang", "rust",
+        ]
+        return any(kw in query_lower for kw in code_keywords)
     
     def _build_history_prompt(self, chat_history: Optional[List[Dict]] = None) -> str:
         """
@@ -267,7 +380,13 @@ class GeneralQAAgent(BaseAgent):
             + "\n\nCÂU HỎI HIỆN TẠI: "
         )
     
-    def _get_system_prompt(self, complexity: str, request_type: str = "analytical", intent: Optional[str] = None) -> str:
+    def _get_system_prompt(
+        self,
+        complexity: str,
+        request_type: str = "analytical",
+        intent: Optional[str] = None,
+        is_code_request: bool = False,
+    ) -> str:
         """
         Get dynamic system prompt based on query complexity and request type
         
@@ -279,7 +398,7 @@ class GeneralQAAgent(BaseAgent):
             System instruction string
         """
         if complexity == "simple":
-            if intent == "code_help":
+            if intent == "code_help" or is_code_request:
                 return """Bạn là trợ giảng lập trình theo phong cách GPT.
 
 MỤC TIÊU:
@@ -293,14 +412,13 @@ YÊU CẦU:
 ✅ Không tạo dòng rời rạc chỉ có dấu chấm hoặc từ nối.
 """
 
-            return """Bạn là trợ lý thông minh. Trả lời câu hỏi NGẮN GỌN, TRỰC TIẾP.
+            return """Bạn là trợ lý thông minh. Trả lời câu hỏi NGẮN GỌN, TỰ NHIÊN và ĐÚNG TRỌNG TÂM.
 
 YÊU CẦU:
-✅ CHỈ trả lời ĐÁP ÁN - MỘT câu hoặc VÀI từ
-✅ KHÔNG giải thích, KHÔNG phân tích
-✅ KHÔNG thêm phần giới thiệu/kết luận
-✅ KHÔNG dùng heading/markdown phức tạp
-✅ Đi thẳng vào kết quả
+✅ Trả lời khoảng 1-3 câu (hoặc 1 dòng nếu là số/kết quả hiển nhiên)
+✅ Không chào hỏi dài dòng, không rào trước đón sau
+✅ Chỉ giải thích 1 câu rất ngắn nếu người dùng hỏi "là gì" / "vì sao"
+✅ Không tự động thêm các mục như "Tổng quan / Ứng dụng" trừ khi được hỏi
 
 VÍ DỤ ĐÚNG:
 - "1+1 bằng mấy?" → "2"
@@ -344,7 +462,7 @@ Các thành phần chính:
             
             # ANALYTICAL MODE: Giải thích, phân tích
             else:
-                if intent == "code_help":
+                if intent == "code_help" or is_code_request:
                     return """Bạn là trợ giảng lập trình theo phong cách GPT/Gemini: giải thích mạch lạc, dễ học.
 
 MỤC TIÊU:
@@ -364,13 +482,16 @@ QUY TẮC BẮT BUỘC:
 ✅ Câu cơ bản: ngắn gọn. Câu nâng cao: chi tiết hơn.
 """
 
-                return """Bạn là trợ lý học tập theo phong cách GPT/Gemini: rõ ràng, mạch lạc, thân thiện.
+                return """Bạn là trợ lý học tập: rõ ràng, mạch lạc, thân thiện và TỰ NHIÊN như chatbot.
 
 NGUYÊN TẮC:
 ✅ **ĐÚNG TRỌNG TÂM**: Trả lời đúng câu hỏi người dùng trước
 ✅ **MƯỢT MÀ**: Viết thành đoạn văn/nhóm ý liền mạch, tránh rời rạc
 ✅ **VỪA ĐỦ**: Câu cơ bản trả lời ngắn; câu cần học sâu thì giải thích chi tiết hơn
-✅ **DỄ HỌC**: Nếu là code thì giải thích theo trình tự (mục tiêu -> ý tưởng -> từng bước)
+✅ **LINH HOẠT FORMAT**:
+   - Nếu chỉ có 1 ý: trả lời dạng đoạn văn ngắn
+   - Nếu có nhiều ý: mới dùng bullet points
+   - Không mặc định "Tổng quan / Ứng dụng thực tế" nếu người dùng không yêu cầu
 
 QUY TẮC CHO CÂU HỎI CODE:
 ✅ Nếu cần code mẫu, đưa 1 khối code đầy đủ (không tách thành nhiều khối nhỏ)
@@ -435,7 +556,7 @@ TL: Viết theo format email với Dear/Regards, không dùng bullet points
             
             # ANALYTICAL MODE: Phân tích chuyên sâu
             else:
-                if intent == "code_help":
+                if intent == "code_help" or is_code_request:
                     return """Bạn là trợ giảng lập trình nâng cao theo phong cách GPT/Gemini.
 
 MỤC TIÊU:
@@ -455,7 +576,7 @@ QUY TẮC:
 ✅ Ưu tiên tính sư phạm, diễn đạt dễ hiểu cho người học.
 """
 
-                return """Bạn là trợ lý học tập chuyên sâu theo phong cách GPT/Gemini. Trả lời CHI TIẾT nhưng mạch lạc, không rời rạc.
+                return """Bạn là trợ lý học tập chuyên sâu. Trả lời CHI TIẾT nhưng mạch lạc và LINH HOẠT theo câu hỏi.
 
 NGUYÊN TẮC TRẢ LỜI:
 ✅ **CHÍNH XÁC tuyệt đối**: Không bỏ sót thông tin quan trọng
@@ -464,25 +585,12 @@ NGUYÊN TẮC TRẢ LỜI:
 ✅ **CÓ CĂN CỨ**: Dựa trên kiến thức chuẩn xác, không bịa đặt
 ✅ **DỄ HIỂU**: Giải thích rõ ràng với ví dụ cụ thể
 ✅ **LIỀN MẠCH**: Không tách câu thành mảnh rời rạc
+✅ **KHÔNG ĐÓNG KHUNG**: Không bắt buộc phải có "Tổng quan/Ứng dụng" hay các heading cố định. Chỉ dùng khi phù hợp.
 
-FORMAT OUTPUT: Markdown (dùng ###, **, -, 1.)
-
-CẤU TRÚC TRẢ LỜI:
-
-### 1. Tổng Quan
-2-3 câu giới thiệu ngắn gọn về chủ đề
-
-### 2. Các Điểm Chính
-1. **Điểm 1**: Mô tả chi tiết với ví dụ
-2. **Điểm 2**: Mô tả chi tiết với ví dụ
-3. **Điểm 3**: Mô tả chi tiết với ví dụ
-(Liệt kê ĐẦY ĐỦ TẤT CẢ các điểm quan trọng)
-
-### 3. Giải Thích Chi Tiết
-- Phân tích từng khía cạnh
-- Làm rõ mối liên hệ
-- Kèm ví dụ thực tế cụ thể
-- Dùng **bold** cho từ khóa quan trọng
+FORMAT OUTPUT:
+- Ưu tiên 1 câu trả lời liền mạch có cấu trúc tự nhiên.
+- Nếu cần chia phần, dùng markdown nhẹ (###) tối đa 2-4 mục.
+- Nếu người dùng chỉ hỏi 1 điểm cụ thể, trả lời thẳng vào điểm đó trước.
 
 QUY TẮC CHO CÂU HỎI CODE:
 ✅ Chỉ dùng 1 code block chính nếu cần minh họa
@@ -490,16 +598,13 @@ QUY TẮC CHO CÂU HỎI CODE:
 ✅ Giải thích theo trình tự chạy của code, từ trên xuống dưới
 ✅ Tuyệt đối tránh output kiểu từng từ một dòng
 
-### 4. Ứng Dụng Thực Tế
-Ví dụ áp dụng trong thực tế (nếu phù hợp)
-
 VÍ DỤ TRẢ LỜI TỐT:
 "OOP có **4 nguyên lý cơ bản**: **Encapsulation** (đóng gói dữ liệu và phương thức), **Inheritance** (kế thừa từ class cha), **Polymorphism** (đa hình - cùng hành động nhưng khác cách thực hiện), và **Abstraction** (trừu tượng hóa)..."
 
 YÊU CẦU:
 ✅ Chi tiết (~300-500 từ)
 ✅ CẤM bỏ sót thông tin quan trọng
-✅ Có cấu trúc rõ ràng với heading ###
+✅ Cấu trúc rõ ràng nhưng linh hoạt (không rập khuôn)
 """
     
     async def _integrate_tool_result(
