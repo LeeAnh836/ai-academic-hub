@@ -214,7 +214,8 @@ class ModelManager:
         system_instruction: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 8000,
-        enable_fallback: bool = True
+        enable_fallback: bool = True,
+        enable_google_search: bool = False
     ) -> str:
         """
         Generate text with provider and automatic fallback.
@@ -227,6 +228,7 @@ class ModelManager:
             temperature: Temperature
             max_tokens: Max tokens
             enable_fallback: Enable automatic fallback to Groq if primary fails
+            enable_google_search: Enable Gemini Google Search grounding (Gemini only)
         
         Returns:
             Generated text
@@ -236,7 +238,7 @@ class ModelManager:
             if "gemini" in provider_name:
                 return self._generate_gemini(
                     model_identifier, prompt, system_instruction, 
-                    temperature, max_tokens
+                    temperature, max_tokens, enable_google_search
                 )
             elif "openai" in provider_name:
                 return self._generate_openai(
@@ -806,60 +808,84 @@ class ModelManager:
         prompt: str,
         system_instruction: Optional[str],
         temperature: float,
-        max_tokens: int
+        max_tokens: int,
+        enable_google_search: bool = False
     ) -> str:
         """Generate text using Gemini REST API."""
         full_prompt = f"{system_instruction}\n\n{prompt}" if system_instruction else prompt
-        
-        payload = {
-            "contents": [{
-                "parts": [{"text": full_prompt}]
-            }],
-            "generationConfig": {
-                "temperature": temperature,
-                "maxOutputTokens": max_tokens
-            }
-        }
-        
-        keys_to_try = len(getattr(self, 'gemini_api_keys', [1])) or 1
+
+        tool_variants: list[Optional[str]] = [None]
+        if enable_google_search and settings.ENABLE_GEMINI_GOOGLE_SEARCH:
+            # Prefer google_search (supported by current Gemini API); fallback to older name if needed.
+            tool_variants = ["google_search", "google_search_retrieval"]
+
         last_exception = None
-        
-        for attempt in range(keys_to_try):
-            api_key = self._get_available_gemini_key()
-            # v1beta supports all models including gemini-2.5; v1 does not support 2.5 yet
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_identifier}:generateContent?key={api_key}"
-            
-            try:
-                with httpx.Client(timeout=240.0) as client:
-                    response = client.post(url, json=payload)
-                    response.raise_for_status()
-                    data = response.json()
+        for tool_variant in tool_variants:
+            payload = {
+                "contents": [{
+                    "parts": [{"text": full_prompt}]
+                }],
+                "generationConfig": {
+                    "temperature": temperature,
+                    "maxOutputTokens": max_tokens
+                }
+            }
+            if tool_variant:
+                payload["tools"] = [{tool_variant: {}}]
+                logger.info(f"🔎 Gemini search tool enabled: {tool_variant}")
 
-                    text = self._extract_gemini_text(data)
-                    if text:
-                        return text
-                    
-                    raise ValueError(f"Unexpected Gemini response format: {data}")
-            except httpx.HTTPStatusError as e:
-                body_preview = response.text[:600] if response.text else ""
-                error_msg = f"Gemini API {response.status_code}: {body_preview}"
+            keys_to_try = len(getattr(self, 'gemini_api_keys', [1])) or 1
+            for attempt in range(keys_to_try):
+                api_key = self._get_available_gemini_key()
+                # v1beta supports all models including gemini-2.5; v1 does not support 2.5 yet
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_identifier}:generateContent?key={api_key}"
 
-                should_rotate = self._handle_gemini_http_error(
-                    api_key=api_key,
-                    status_code=response.status_code,
-                    error_msg=error_msg,
-                    model_identifier=model_identifier,
-                    context="text",
-                )
-                if should_rotate:
-                    last_exception = Exception(error_msg)
-                    continue  # Try the next key
-                else:
-                    raise Exception(error_msg) from e
-            except Exception as e:
-                raise e
-                
+                try:
+                    with httpx.Client(timeout=240.0) as client:
+                        response = client.post(url, json=payload)
+                        response.raise_for_status()
+                        data = response.json()
+
+                        text = self._extract_gemini_text(data)
+                        if text:
+                            if tool_variant and "groundingMetadata" in (data or {}):
+                                logger.info("✅ Gemini response includes groundingMetadata")
+                            return text
+
+                        raise ValueError(f"Unexpected Gemini response format: {data}")
+                except httpx.HTTPStatusError as e:
+                    body_preview = response.text[:600] if response.text else ""
+                    error_msg = f"Gemini API {response.status_code}: {body_preview}"
+
+                    if tool_variant and self._is_gemini_tool_unsupported_error(error_msg):
+                        logger.warning(
+                            f"⚠️ Gemini tool '{tool_variant}' not supported, trying fallback tool"
+                        )
+                        last_exception = Exception(error_msg)
+                        break
+
+                    should_rotate = self._handle_gemini_http_error(
+                        api_key=api_key,
+                        status_code=response.status_code,
+                        error_msg=error_msg,
+                        model_identifier=model_identifier,
+                        context="search" if tool_variant else "text",
+                    )
+                    if should_rotate:
+                        last_exception = Exception(error_msg)
+                        continue  # Try the next key
+                    else:
+                        raise Exception(error_msg) from e
+                except Exception as e:
+                    raise e
+
         raise last_exception if last_exception else Exception("All Gemini keys failed")
+
+    def _is_gemini_tool_unsupported_error(self, error_str: str) -> bool:
+        s = (error_str or "").lower()
+        if "google_search" not in s and "google_search_retrieval" not in s:
+            return False
+        return "not supported" in s or "unsupported" in s or "invalid_argument" in s
 
     def _extract_gemini_text(self, data: dict) -> Optional[str]:
         """

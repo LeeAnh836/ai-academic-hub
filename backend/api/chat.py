@@ -3,6 +3,7 @@ Chat routes - Chat sessions, messages
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from datetime import date, datetime
 from typing import Any, Dict, List
 from uuid import UUID, uuid4
@@ -12,6 +13,7 @@ from core.databases import get_db
 from api.dependencies import get_current_user, CurrentUser
 from services.chat_service import chat_service
 from services.chat_history_service import chat_history_service
+from services.minio_service import minio_service
 from schemas.chat import (
     ChatSessionResponse, ChatSessionCreateRequest, ChatMessageResponse,
     ChatMessageCreateRequest, MessageFeedbackRequest, ChatSessionDetailResponse,
@@ -37,6 +39,13 @@ FILE_MENTION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SOURCE_ID_PREFIX_PATTERN = re.compile(r"\bid\s*:\s*([0-9a-fA-F]{8})\b", re.IGNORECASE)
+SPREADSHEET_EXTENSIONS = {".csv", ".xlsx", ".xls"}
+SPREADSHEET_MIME_TYPES = {
+    "text/csv",
+    "application/csv",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
 
 
 def _resolve_canonical_document_ids(db: Session, user_id: UUID, document_ids: List[str]) -> List[str]:
@@ -65,6 +74,77 @@ def _resolve_trace_id(request: Request) -> str:
     if incoming and incoming.strip():
         return incoming.strip()
     return str(uuid4())
+
+
+def _is_spreadsheet_document(doc: Document) -> bool:
+    file_type = (doc.file_type or "").lower().strip()
+    if file_type in SPREADSHEET_MIME_TYPES:
+        return True
+    file_name = (doc.file_name or "").lower().strip()
+    return any(file_name.endswith(ext) for ext in SPREADSHEET_EXTENSIONS)
+
+
+def _extract_object_name(file_path: str) -> str:
+    normalized = (file_path or "").strip()
+    if not normalized:
+        return ""
+    if "/" in normalized:
+        return normalized.split("/", 1)[1]
+    return normalized
+
+
+def _select_spreadsheet_doc(
+    db: Session,
+    user_id: UUID,
+    document_ids: List[str],
+    trace_id: str,
+) -> Document | None:
+    if not document_ids:
+        return None
+
+    valid_ids: List[UUID] = []
+    for document_id in document_ids:
+        try:
+            valid_ids.append(UUID(str(document_id)))
+        except Exception:
+            continue
+
+    if not valid_ids:
+        return None
+
+    rows = (
+        db.query(Document)
+        .filter(Document.user_id == user_id)
+        .filter(
+            or_(
+                Document.id.in_(valid_ids),
+                Document.canonical_document_id.in_(valid_ids),
+            )
+        )
+        .all()
+    )
+
+    spreadsheet_candidates = [doc for doc in rows if _is_spreadsheet_document(doc)]
+    if len(spreadsheet_candidates) == 1:
+        return spreadsheet_candidates[0]
+    if len(spreadsheet_candidates) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "multiple_spreadsheet_files",
+                "message": "Có nhiều file CSV/XLSX được đính kèm. Vui lòng chọn 1 file để phân tích.",
+                "candidate_documents": [
+                    {
+                        "document_id": str(doc.id),
+                        "file_name": doc.file_name,
+                        "file_type": doc.file_type,
+                    }
+                    for doc in spreadsheet_candidates[:5]
+                ],
+                "trace_id": trace_id,
+            },
+        )
+    return None
 
 
 def _mongo_message_to_response(message: dict, session_id: UUID) -> dict:
@@ -741,6 +821,7 @@ async def ask_in_chat_session(
         # - document_ids=[] → Direct chat (no RAG)
         # - document_ids=None → Use session's context_documents (no cross-session fallback)
         # - document_ids=[...] → Use specified documents AND persist to session
+        raw_doc_ids: List[str] = []
         if request.document_ids is not None:
             # User explicitly specified (including [])
             raw_doc_ids = [str(doc_id) for doc_id in request.document_ids] if request.document_ids else []
@@ -791,6 +872,22 @@ async def ask_in_chat_session(
             explicit_source_ids = fallback_source_ids
         elif filename_mention_source_ids:
             explicit_source_ids = fallback_source_ids or filename_mention_source_ids
+
+        spreadsheet_doc = None
+        if request.document_ids is not None:
+            spreadsheet_doc = _select_spreadsheet_doc(
+                db=db,
+                user_id=current_user.id,
+                document_ids=raw_doc_ids,
+                trace_id=trace_id,
+            )
+        elif session.context_documents:
+            spreadsheet_doc = _select_spreadsheet_doc(
+                db=db,
+                user_id=current_user.id,
+                document_ids=[str(doc_id) for doc_id in session.context_documents],
+                trace_id=trace_id,
+            )
 
         if chat_history_service.enabled:
             chat_history_service.ensure_conversation(
@@ -864,39 +961,82 @@ async def ask_in_chat_session(
                 },
             )
 
-        ai_request = {
-            "query": request.question,
-            "user_id": str(current_user.id),
-            "session_id": str(session_id),
-            "document_ids": doc_ids_to_use,
-            "top_k": request.top_k,
-            "score_threshold": request.score_threshold,
-            "chat_history": chat_history_for_ai,
-            "conversation_summary": conversation_summary,
-            "source_ids": source_ids_for_ai,
-            "source_metadata": source_metadata_for_ai,
-            "trace_id": trace_id,
-            # Backend is the single writer for Mongo chat history + summaries
-            # via `chat_history_service`. Prevent ai-service from writing duplicates.
-            "persisted_by_backend": True,
-        }
-        
-        # Add optional parameters
-        if request.temperature is not None:
-            ai_request["temperature"] = request.temperature
-        if request.max_tokens is not None:
-            ai_request["max_tokens"] = request.max_tokens
+        if spreadsheet_doc:
+            object_name = _extract_object_name(spreadsheet_doc.file_path)
+            if not object_name:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail={
+                        "code": "spreadsheet_missing_path",
+                        "message": "Không tìm thấy đường dẫn file bảng tính để phân tích.",
+                        "trace_id": trace_id,
+                    },
+                )
 
-        ai_request = _json_safe(ai_request)
-        
-        # Call AI Service with timeout
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            ai_response = await client.post(
-                ai_service_url,
-                json=ai_request
-            )
-            ai_response.raise_for_status()
-            ai_data = ai_response.json()
+            try:
+                file_bytes = minio_service.download_file(object_name)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Không thể tải file từ lưu trữ: {e}",
+                )
+
+            ai_service_url = f"{settings.AI_SERVICE_URL}/api/agent/analyze-data"
+            form_data = {
+                "query": request.question,
+                "user_id": str(current_user.id),
+                "session_id": str(session_id),
+            }
+            files = {
+                "file": (
+                    spreadsheet_doc.file_name,
+                    file_bytes,
+                    spreadsheet_doc.file_type or "application/octet-stream",
+                )
+            }
+
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                ai_response = await client.post(
+                    ai_service_url,
+                    data=form_data,
+                    files=files,
+                )
+                ai_response.raise_for_status()
+                ai_data = ai_response.json()
+        else:
+            ai_request = {
+                "query": request.question,
+                "user_id": str(current_user.id),
+                "session_id": str(session_id),
+                "document_ids": doc_ids_to_use,
+                "top_k": request.top_k,
+                "score_threshold": request.score_threshold,
+                "chat_history": chat_history_for_ai,
+                "conversation_summary": conversation_summary,
+                "source_ids": source_ids_for_ai,
+                "source_metadata": source_metadata_for_ai,
+                "trace_id": trace_id,
+                # Backend is the single writer for Mongo chat history + summaries
+                # via `chat_history_service`. Prevent ai-service from writing duplicates.
+                "persisted_by_backend": True,
+            }
+
+            # Add optional parameters
+            if request.temperature is not None:
+                ai_request["temperature"] = request.temperature
+            if request.max_tokens is not None:
+                ai_request["max_tokens"] = request.max_tokens
+
+            ai_request = _json_safe(ai_request)
+
+            # Call AI Service with timeout
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                ai_response = await client.post(
+                    ai_service_url,
+                    json=ai_request
+                )
+                ai_response.raise_for_status()
+                ai_data = ai_response.json()
         
         # 4. Save AI response message (Multi-Agent response format)
         # Extract context information from metadata if available

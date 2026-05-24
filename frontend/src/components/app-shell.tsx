@@ -21,7 +21,7 @@ export function AppShell() {
       {/* Main content */}
       <main
         className={cn(
-          "flex-1 transition-all duration-300",
+          "flex-1 min-w-0 transition-all duration-300",
           isAuthenticated && "md:ml-[240px]",
           isAuthenticated && collapsed && "md:ml-[68px]",
           isAuthenticated && "pb-16 md:pb-0"

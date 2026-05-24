@@ -5,8 +5,10 @@ import docker
 import tempfile
 import os
 import json
+import re
 from typing import Dict, Any, Optional
 import logging
+from requests.exceptions import ReadTimeout
 
 from core.config import settings
 
@@ -65,8 +67,16 @@ class CodeExecutor:
         timeout = timeout or settings.CODE_EXEC_TIMEOUT
         
         try:
-            # Create temporary directory  for code and data
-            with tempfile.TemporaryDirectory() as tmpdir:
+            # Create temporary directory for code and data
+            use_volume = bool(settings.CODE_EXEC_VOLUME_NAME) and os.path.exists("/.dockerenv")
+            shared_dir = settings.CODE_EXEC_SHARED_DIR if use_volume else None
+            if use_volume and shared_dir:
+                os.makedirs(shared_dir, exist_ok=True)
+                tmp_dir_ctx = tempfile.TemporaryDirectory(dir=shared_dir)
+            else:
+                tmp_dir_ctx = tempfile.TemporaryDirectory()
+
+            with tmp_dir_ctx as tmpdir:
                 # Write code to file
                 code_file = os.path.join(tmpdir, "script.py")
                 with open(code_file, 'w', encoding='utf-8') as f:
@@ -83,46 +93,82 @@ class CodeExecutor:
                 import time
                 start_time = time.time()
                 
-                result = self.client.containers.run(
+                volume_spec = (
+                    {settings.CODE_EXEC_VOLUME_NAME: {'bind': '/workspace', 'mode': 'rw'}}
+                    if use_volume
+                    else {tmpdir: {'bind': '/workspace', 'mode': 'rw'}}
+                )
+                container_workdir = (
+                    f"/workspace/{os.path.basename(tmpdir)}"
+                    if use_volume
+                    else "/workspace"
+                )
+
+                container = self.client.containers.run(
                     image=settings.CODE_EXEC_DOCKER_IMAGE,
-                    command=["python", "/workspace/script.py"],
-                    volumes={
-                        tmpdir: {'bind': '/workspace', 'mode': 'rw'}
-                    },
-                    working_dir='/workspace',
-                    remove=True,
+                    command=["python", "script.py"],
+                    volumes=volume_spec,
+                    working_dir=container_workdir,
+                    detach=True,
+                    remove=False,
                     stdout=True,
                     stderr=True,
-                    timeout=timeout,
                     mem_limit='512m',  # Limit memory
                     network_disabled=True  # No network access
                 )
-                
+                try:
+                    wait_result = container.wait(timeout=timeout)
+                except ReadTimeout:
+                    try:
+                        container.kill()
+                    except Exception:
+                        pass
+                    return {
+                        "success": False,
+                        "output": "",
+                        "error": f"execution_timeout_{timeout}s",
+                        "execution_time": time.time() - start_time
+                    }
+
                 execution_time = time.time() - start_time
-                
-                # Decode output
-                output = result.decode('utf-8')
-                
-                # Truncate if too long
+                exit_code = (
+                    wait_result.get("StatusCode", 1)
+                    if isinstance(wait_result, dict)
+                    else wait_result
+                )
+                stdout = container.logs(stdout=True, stderr=False)
+                stderr = container.logs(stdout=False, stderr=True)
+
+                output = stdout.decode('utf-8', errors='replace') if stdout else ""
+                error_output = stderr.decode('utf-8', errors='replace') if stderr else ""
+
                 if len(output) > settings.CODE_EXEC_MAX_OUTPUT_SIZE:
                     output = output[:settings.CODE_EXEC_MAX_OUTPUT_SIZE] + "\n... (truncated)"
-                
+
+                if exit_code not in (0, "0", None):
+                    return {
+                        "success": False,
+                        "output": output,
+                        "error": error_output or f"exit_code_{exit_code}",
+                        "execution_time": execution_time
+                    }
+
                 return {
                     "success": True,
                     "output": output,
-                    "error": "",
+                    "error": error_output,
                     "execution_time": execution_time
                 }
-        
+                
         except docker.errors.ContainerError as e:
             # Code execution error
             return {
                 "success": False,
-                "output": e.exit_status,
+                "output": str(e.exit_status),
                 "error": e.stderr.decode('utf-8') if e.stderr else str(e),
                 "execution_time": 0
             }
-        
+
         except Exception as e:
             logger.error(f"❌ Code execution error: {e}")
             return {
@@ -131,6 +177,13 @@ class CodeExecutor:
                 "error": str(e),
                 "execution_time": 0
             }
+
+        finally:
+            if 'container' in locals() and container is not None:
+                try:
+                    container.remove(force=True)
+                except Exception:
+                    pass
     
     def execute_pandas_code(
         self,
@@ -149,13 +202,35 @@ class CodeExecutor:
         Returns:
             Execution result
         """
-        # Prepend pandas import if not present
-        if "import pandas" not in code:
+        needs_import = "import pandas" not in code
+        file_ext = os.path.splitext(filename or "")[1].lower()
+        load_stmt = (
+            f"df = pd.read_excel('{filename}')"
+            if file_ext in {".xlsx", ".xls"}
+            else f"df = pd.read_csv('{filename}')"
+        )
+
+        defines_df = bool(re.search(r"^\s*df\s*=", code, re.MULTILINE))
+        uses_reader = any(token in code for token in [
+            "read_csv(",
+            "read_excel(",
+            "read_table(",
+            "read_parquet(",
+        ])
+
+        needs_load = not defines_df and not uses_reader
+
+        if needs_import and needs_load:
+            code = "import pandas as pd\n" + load_stmt + "\n" + code
+        elif needs_import:
             code = "import pandas as pd\n" + code
-        
-        # Load CSV if not already loaded
-        if "read_csv" not in code and "df" not in code:
-            code = f"df = pd.read_csv('{filename}')\n" + code
+        elif needs_load:
+            code = re.sub(
+                r"(import\s+pandas[^\n]*\n)",
+                r"\1" + load_stmt + "\n",
+                code,
+                count=1,
+            )
         
         return self.execute_code(
             code=code,

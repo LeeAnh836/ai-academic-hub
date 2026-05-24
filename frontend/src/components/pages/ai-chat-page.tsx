@@ -560,9 +560,11 @@ export function AIChatPage() {
       {/* ── Conversation List ── */}
       <div
         className={cn(
-          "flex shrink-0 flex-col border-r border-border bg-card transition-all duration-300",
-          historyCollapsed ? "w-0 md:w-[68px] overflow-hidden" : "w-full md:w-[300px] lg:w-[320px]",
-          selectedChat && "hidden md:flex"
+          "flex flex-none flex-col border-r border-border bg-card transition-all duration-300",
+          historyCollapsed
+            ? "w-0 md:w-[68px] md:min-w-[68px] md:max-w-[68px] overflow-hidden"
+            : "w-full md:w-[300px] lg:w-[320px] md:min-w-[300px] md:max-w-[320px]",
+          (selectedChat || isDraftMode) && "hidden md:flex"
         )}
       >
         {/* Header */}
@@ -641,13 +643,15 @@ export function AIChatPage() {
                         setIsDraftMode(false)
                       }}
                       className={cn(
-                        "flex w-full overflow-hidden items-center gap-2 rounded-lg transition-colors px-3 py-2.5 text-left",
+                        "flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-lg transition-colors px-3 py-2.5 text-left",
                         selectedChat === chat.id && !isDraftMode
                           ? "bg-accent"
                           : "hover:bg-secondary"
                       )}
                     >
-                      <p className="flex-1 truncate text-sm font-medium text-foreground min-w-0">{chat.title}</p>
+                      <p className="flex-1 min-w-0 max-w-full truncate text-sm font-medium text-foreground">
+                        {chat.title}
+                      </p>
                     </button>
                   ))}
                 </div>
@@ -701,7 +705,10 @@ export function AIChatPage() {
                   size="icon"
                   variant="ghost"
                   className="h-8 w-8 md:hidden"
-                  onClick={() => setSelectedChat(null)}
+                  onClick={() => {
+                    setSelectedChat(null)
+                    setIsDraftMode(false)
+                  }}
                 >
                   <ArrowLeft className="h-4 w-4" />
                 </Button>
@@ -740,7 +747,7 @@ export function AIChatPage() {
             </div>
 
             {/* Messages */}
-            <ScrollArea className="flex-1 px-2 py-4 sm:px-4 md:px-6 lg:px-8">
+            <ScrollArea className="flex-1 min-w-0 px-2 py-4 sm:px-4 md:px-6 lg:px-8">
               <div className="mx-auto w-full min-w-0 max-w-6xl space-y-6">
                 {messagesLoading && !isDraftMode && localMessages.length === 0 ? (
                   <div className="flex items-center justify-center py-12">
@@ -767,7 +774,7 @@ export function AIChatPage() {
                     <div
                       key={msg.id}
                       className={cn(
-                        "flex gap-3",
+                        "flex min-w-0 gap-3",
                         msg.role === "user" ? "justify-end" : "justify-start"
                       )}
                     >
@@ -776,7 +783,12 @@ export function AIChatPage() {
                           <img src="/logo.png" alt="AI" className="h-6 w-6 object-contain" />
                         </div>
                       )}
-                      <div className={cn("flex flex-1 min-w-0 flex-col gap-1", msg.role === "user" ? "items-end" : "w-full items-start")}>
+                      <div
+                        className={cn(
+                          "flex flex-1 min-w-0 flex-col gap-1",
+                          msg.role === "user" ? "items-end" : "items-start"
+                        )}
+                      >
                         {/* Attached file chips – shown above the text bubble */}
                         {msg.attachedFiles && msg.attachedFiles.length > 0 && (
                           <div className="flex flex-wrap gap-1.5 max-w-[420px]">
@@ -797,7 +809,7 @@ export function AIChatPage() {
                         {/* Message bubble */}
                         <div
                           className={cn(
-                            "min-w-0 max-w-full overflow-hidden rounded-2xl px-4 py-3",
+                            "min-w-0 max-w-full break-words rounded-2xl px-4 py-3",
                             msg.role === "user"
                               ? "max-w-[85%] border border-border bg-card text-foreground shadow-sm md:max-w-[75%]"
                               : "w-full bg-secondary/80 text-foreground"

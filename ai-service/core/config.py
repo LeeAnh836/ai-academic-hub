@@ -23,12 +23,6 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: Optional[str] = None
     QDRANT_GRPC_PORT: int = 6334
     
-    # Neo4j Settings (Graph Database for GraphRAG)
-    NEO4J_URI: Optional[str] = None  # e.g., "neo4j+s://xxxxx.databases.neo4j.io"
-    NEO4J_USERNAME: Optional[str] = None  # Usually "neo4j"
-    NEO4J_PASSWORD: Optional[str] = None
-    NEO4J_DATABASE: str = "neo4j"  # Default database name
-    ENABLE_NEO4J: bool = False  # Enable after setup
     
     # Cohere Settings (Embeddings & LLM)
     COHERE_API_KEY: str
@@ -39,6 +33,7 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: Optional[str] = None
     GEMINI_FLASH_MODEL: str = "gemini-1.5-flash-latest"
     GEMINI_PRO_MODEL: str = "gemini-1.5-pro-latest"
+    ENABLE_GEMINI_GOOGLE_SEARCH: bool = True  # Grounding with Google Search tool
     
     # Groq Settings (FALLBACK LLM - FREE)
     GROQ_API_KEY: Optional[str] = None
@@ -72,14 +67,6 @@ class Settings(BaseSettings):
     RAG_MAX_CONTEXT_LENGTH: int = 8000
     RAG_ENABLE_FALLBACK: bool = True  # Enable fallback retrieval
     
-    # GraphRAG Settings
-    ENABLE_GRAPH_RAG: bool = False  # Enable after Neo4j setup
-    GRAPH_RAG_MODE: str = "hybrid"  # "vector_only", "graph_only", "hybrid"
-    GRAPH_EXTRACTION_MODEL: str = "gemini"  # Use Gemini Flash for free entity extraction
-    GRAPH_MAX_ENTITIES: int = 50  # Max entities to extract per chunk
-    GRAPH_TOP_K: int = 10  # Top K related entities from graph
-    GRAPH_TRAVERSAL_DEPTH: int = 2  # How deep to traverse relationships
-
     # Advanced RAG Settings
     ENABLE_ADVANCED_RAG: bool = True  # Enable full Advanced RAG pipeline
     # Query Rewriting
@@ -140,6 +127,8 @@ class Settings(BaseSettings):
     CODE_EXEC_TIMEOUT: int = 30  # 30 seconds
     CODE_EXEC_DOCKER_IMAGE: str = "python:3.11-slim"
     CODE_EXEC_MAX_OUTPUT_SIZE: int = 10000  # 10KB
+    CODE_EXEC_VOLUME_NAME: Optional[str] = "code_exec_data"
+    CODE_EXEC_SHARED_DIR: str = "/code_exec"
     
     # Data Analysis Settings
     PANDAS_MAX_ROWS: int = 10000

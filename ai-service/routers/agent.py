@@ -178,7 +178,8 @@ async def analyze_data(
             "file_data": file_data,
             "file_name": file_name,
             "file_path": None,  # Not using file_path, using file_data directly
-            "force_intent": "data_analysis"
+            "force_intent": "data_analysis",
+            "persisted_by_backend": True,
         }
         
         # Process with orchestrator

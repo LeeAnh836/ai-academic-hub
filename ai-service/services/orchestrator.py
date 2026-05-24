@@ -12,13 +12,6 @@ from services.embedding_service import embedding_service
 from core.qdrant import qdrant_manager
 from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny
 
-# Import Hybrid RAG if GraphRAG is enabled
-try:
-    from services.hybrid_rag_service import hybrid_rag_service
-    HYBRID_RAG_AVAILABLE = True
-except ImportError:
-    HYBRID_RAG_AVAILABLE = False
-
 
 class AIOrchestrator:
     """
@@ -714,24 +707,9 @@ HƯỚNG DẪN GIẢI CHI TIẾT:"""
         score_threshold: float
     ) -> List[Dict[str, Any]]:
         """
-        Retrieve contexts using Hybrid RAG (if enabled) or Vector RAG only
-        
-        Hybrid RAG combines:
-        - Vector search (Qdrant): Semantic similarity
-        - Graph search (Neo4j): Entity relationships
+        Retrieve contexts using Vector RAG only.
         """
         try:
-            # Use Hybrid RAG if GraphRAG is enabled
-            if HYBRID_RAG_AVAILABLE and settings.ENABLE_GRAPH_RAG:
-                print("🔀 Using Hybrid RAG (Vector + Graph)")
-                return await hybrid_rag_service.hybrid_retrieve(
-                    query=query,
-                    user_id=user_id,
-                    document_ids=document_ids,
-                    top_k=top_k,
-                    score_threshold=score_threshold
-                )
-            
             # Fallback to Vector RAG only (original implementation)
             print("📊 Using Vector RAG only")
             

@@ -1,146 +1,136 @@
-# JVB Backend API
+# Backend
+
+Backend là lớp API nghiệp vụ chính của hệ thống. Thư mục này chịu trách nhiệm xác thực, quản lý người dùng, tài liệu, hội thoại, nhóm, nhắn tin, admin và tích hợp với các dịch vụ hạ tầng.
+
+## Vai trò chính
+
+- Cung cấp REST API cho frontend.
+- Xác thực JWT và quản lý phiên đăng nhập.
+- Làm việc với PostgreSQL, MongoDB, Redis, MinIO và Qdrant.
+- Đồng bộ dữ liệu liên quan tới chat history và nguồn tài liệu.
+- Đóng vai trò trung gian giữa frontend và ai-service.
 
 ## Cấu trúc thư mục
 
-```
+```text
 backend/
-├── core/
-│   ├── __init__.py
-│   ├── config.py              # Cấu hình chính ứng dụng
-│   ├── databases.py           # Kết nối PostgreSQL
-│   └── redis.py               # Quản lý Redis blacklist
-├── models/
-│   ├── __init__.py
-│   ├── base.py                # BaseModel với UUID
-│   ├── users.py               # User, UserSession, LoginHistory
-│   ├── documents.py           # Document models
-│   ├── chat.py                # Chat models
-│   ├── conversations.py       # Direct message models
-│   ├── groups.py              # Group models
-│   ├── notifications.py       # Notification models
-│   ├── audit.py               # Audit log models
-│   └── STRUCTURE.md
-├── schemas/                   # Pydantic schemas (response/request)
-├── services/
-│   ├── __init__.py
-│   └── token_service.py       # JWT token management
-├── main.py                    # FastAPI main application
-├── requirements.txt           # Python dependencies
-├── Dockerfile                 # Docker image definition
-├── .env                       # Environment variables (git ignored)
-└── .env.example               # Example environment variables
-
+├── api/            # Router FastAPI theo từng domain
+├── core/           # Cấu hình và kết nối hạ tầng
+├── migrations/     # SQL migration bổ sung
+├── models/         # SQLAlchemy models
+├── schemas/        # Pydantic request/response schemas
+├── scripts/        # Script hỗ trợ vận hành/bổ sung dữ liệu
+├── services/       # Business logic và tích hợp dịch vụ
+├── utils/          # Hàm tiện ích dùng chung
+├── main.py         # Entry point FastAPI
+├── requirements.txt
+├── Dockerfile
+└── README.md
 ```
 
-## Chức năng chính
+## Các phần quan trọng
 
-### 1. **Config (core/config.py)**
-- Quản lý tất cả cấu hình ứng dụng
-- Database URL, Redis URL
-- JWT secret key và thuật toán
-- Thời gian expire tokens
-- CORS origins
+### `api/`
 
-### 2. **Database (core/databases.py)**
-- Kết nối PostgreSQL qua SQLAlchemy
-- Hàm `get_db()` dùng làm dependency injection
-- Hàm `init_db()` tạo tất cả tables
-- Hàm `close_db()` đóng kết nối
+Chứa các router theo chức năng:
 
-### 3. **Redis (core/redis.py)**
-- Quản lý token blacklist
-- Lưu tokens bị logout để không thể dùng lại
-- TTL tự động = thời gian token còn hết hạn
-- Hàm:
-  - `add_to_blacklist()`: Thêm token vào blacklist
-  - `is_blacklisted()`: Kiểm tra token bị blacklist
-  - `remove_from_blacklist()`: Xóa token khỏi blacklist
+- `auth.py`: đăng ký, đăng nhập, làm mới token, logout.
+- `users.py`: hồ sơ và quản lý người dùng.
+- `documents.py`: upload, liệt kê, xử lý và xóa tài liệu.
+- `chat.py`: hội thoại, chat sessions, timeline và hỏi đáp.
+- `groups.py`: nhóm, thành viên và tương tác theo nhóm.
+- `messaging.py`: nhắn tin trực tiếp hoặc theo ngữ cảnh nhóm.
+- `admin.py`: endpoint quản trị.
+- `dependencies.py`: dependency dùng chung cho API.
 
-### 4. **Token Service (services/token_service.py)**
-- Tạo JWT access token và refresh token
-- Xác minh token
-- Kiểm tra blacklist
-- Làm mới access token từ refresh token
-- Hàm chính:
-  - `create_access_token()`: Tạo access token
-  - `create_refresh_token()`: Tạo refresh token
-  - `create_token_pair()`: Tạo cả 2 token
-  - `verify_token()`: Xác minh và giải mã token
-  - `blacklist_token()`: Logout (thêm vào blacklist)
-  - `refresh_access_token()`: Làm mới access token
+### `core/`
 
-## Cách sử dụng
+Tập trung toàn bộ phần hạ tầng:
 
-### Setup Environment
+- `config.py`: cấu hình môi trường, URL dịch vụ, CORS, secret, feature flags.
+- `databases.py`: kết nối PostgreSQL và lifecycle database.
+- `mongo.py`: kết nối MongoDB cho chat history/source-of-truth.
+- `redis.py`: Redis cho blacklist và cache liên quan.
+- `minio.py`: kết nối object storage.
+- `qdrant.py`: kết nối vector database.
 
-1. Copy file .env.example:
-```bash
-cp .env.example .env
+### `models/`
+
+Định nghĩa các bảng chính của hệ thống:
+
+- người dùng và phiên đăng nhập.
+- tài liệu và metadata.
+- hội thoại, conversation, message và notification.
+- nhóm và các quan hệ liên quan.
+
+### `schemas/`
+
+Pydantic schemas cho request/response. Đây là lớp dữ liệu mà API trả về cho frontend và nhận từ client.
+
+### `services/`
+
+Chứa business logic tách khỏi router:
+
+- `auth_service.py`: quy trình xác thực.
+- `token_service.py`: tạo, kiểm tra và blacklist token.
+- `chat_service.py` và `chat_history_service.py`: luồng chat, lưu lịch sử, timeline.
+- `document_service.py`: xử lý tài liệu.
+- `group_service.py`, `messaging_service.py`, `user_service.py`: nghiệp vụ theo domain.
+- `minio_service.py`, `qdrant_service.py`, `ai_service.py`: tích hợp các service nền.
+- `user_presence.py`: theo dõi trạng thái người dùng.
+
+### `scripts/`
+
+Script vận hành, ví dụ backfill dữ liệu chat history sang Mongo.
+
+### `migrations/`
+
+Các thay đổi SQL thủ công bổ sung cho schema hoặc dữ liệu.
+
+## Luồng khởi động
+
+Khi `main.py` chạy, backend:
+
+1. Khởi tạo PostgreSQL.
+2. Kết nối Redis blacklist.
+3. Kết nối user presence tracker.
+4. Kết nối MinIO.
+5. Kết nối Qdrant.
+6. Kết nối Mongo chat history nếu feature được bật.
+
+## Chạy backend
+
+### Local bằng Docker Compose
+
+```powershell
+docker compose up -d backend
 ```
 
-2. Chỉnh sửa .env với các thông tin thực tế (nếu cần)
+### Chạy trực tiếp
 
-### Docker Compose
-
-1. Build và chạy với Docker:
-```bash
-docker-compose up -d
+```powershell
+python main.py
 ```
 
-2. Kiểm tra các services:
-- Backend: http://localhost:8000
-- PostgreSQL: localhost:5432
-- Redis: localhost:6379
-- MinIO: http://localhost:9001
-- Qdrant: http://localhost:6333
+API mặc định ở `http://localhost:8000`, tài liệu Swagger ở `http://localhost:8000/docs`.
 
-### Database Migrations
+## Quản lý token
 
-Các tables tự động được tạo khi ứng dụng startup qua `init_db()`
+Backend dùng access token và refresh token để xác thực:
 
-### Sử dụng Token
+- access token ngắn hạn cho request API.
+- refresh token để cấp lại access token.
+- token đã logout được đưa vào Redis blacklist.
 
-```python
-from services.token_service import token_service
-from core.databases import get_db
+## Gợi ý triển khai production
 
-# 1. Tạo token pair khi login
-tokens = token_service.create_token_pair({
-    "user_id": "user-uuid",
-    "email": "user@example.com",
-    "username": "username"
-})
+- Dùng secret mạnh cho `SECRET_KEY`.
+- Bật cấu hình CORS đúng domain thật.
+- Dùng credentials riêng cho PostgreSQL, Redis và MinIO.
+- Kiểm tra kỹ biến môi trường khi build production image.
 
-# 2. Xác minh access token
-payload = token_service.verify_token(access_token, token_type="access")
+## Điểm cần lưu ý
 
-# 3. Logout - thêm token vào blacklist
-await token_service.blacklist_token(access_token, expires_at)
-
-# 4. Làm mới access token
-new_access_token = await token_service.refresh_access_token(refresh_token)
-```
-
-## Triển khai Production
-
-Để triển khai trên production:
-
-1. Đổi `SECRET_KEY` thành một key ngẫu nhiên mạnh:
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-2. Đặt `DEBUG=False`
-
-3. Cấu hình CORS_ORIGINS với domains thực tế
-
-4. Sử dụng database credentials mạnh
-
-5. Sử dụng https cho API endpoints
-
-## Thời gian Token
-
-- **Access Token**: 15 phút (có thể điều chỉnh qua `ACCESS_TOKEN_EXPIRE_MINUTES`)
-- **Refresh Token**: 7 ngày (có thể điều chỉnh qua `REFRESH_TOKEN_EXPIRE_DAYS`)
-
-Khi logout, token sẽ được thêm vào Redis blacklist với TTL = thời gian token còn hết hạn.
+- Backend hiện là nơi gom logic nghiệp vụ, không nên dồn trực tiếp logic AI vào router.
+- Với chat history, Mongo đang đóng vai trò nguồn dữ liệu ưu tiên hơn Redis.
+- Nếu thay đổi schema, cần đồng bộ model, schema và các service liên quan.

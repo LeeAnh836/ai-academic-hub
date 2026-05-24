@@ -13,15 +13,6 @@ from core.memory import memory_manager
 from core.llm_cache import llm_cache
 from routers import embedding, rag, document
 
-# Import GraphRAG router if enabled
-try:
-    from routers import graphrag
-    from core.neo4j_manager import neo4j_manager
-    GRAPHRAG_AVAILABLE = True
-except ImportError:
-    GRAPHRAG_AVAILABLE = False
-    print("⚠️ GraphRAG router not available")
-
 # Import new multi-agent router
 try:
     from routers import agent
@@ -42,17 +33,6 @@ async def lifespan(app: FastAPI):
     # Connect to Qdrant
     print("📦 Connecting to Qdrant...")
     qdrant_manager.connect()
-    
-    # Connect to Neo4j (if enabled)
-    if GRAPHRAG_AVAILABLE and settings.ENABLE_GRAPH_RAG:
-        print("🕸️ Connecting to Neo4j...")
-        try:
-            neo4j_manager.connect()
-            if neo4j_manager.enabled:
-                print("✅ Neo4j GraphRAG ready")
-        except Exception as e:
-            print(f"⚠️ Neo4j connection failed: {e}")
-            print("💡 GraphRAG will be disabled. Vector RAG will still work.")
     
     # Connect to MongoDB (Conversation Memory Manager)
     if settings.ENABLE_MULTI_AGENT:
@@ -78,9 +58,6 @@ async def lifespan(app: FastAPI):
     # Shutdown
     print("🛑 Shutting down AI Service...")
     qdrant_manager.disconnect()
-    
-    if GRAPHRAG_AVAILABLE and settings.ENABLE_GRAPH_RAG:
-        neo4j_manager.disconnect()
     
     if settings.ENABLE_MULTI_AGENT:
         memory_manager.disconnect()
@@ -112,11 +89,6 @@ app.add_middleware(
 app.include_router(embedding.router)
 app.include_router(rag.router)
 app.include_router(document.router)
-
-# Include GraphRAG router if available
-if GRAPHRAG_AVAILABLE:
-    app.include_router(graphrag.router)
-    print("✅ GraphRAG API enabled")
 
 # Include Multi-Agent router if available
 if MULTI_AGENT_ENABLED:

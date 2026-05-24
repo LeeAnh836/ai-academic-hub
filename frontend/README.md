@@ -1,224 +1,132 @@
-# Frontend - JVB Learning Platform
+# Frontend
 
-React + TypeScript + Vite frontend for JVB Learning Platform.
+Frontend là giao diện web của JVB Final. Dự án dùng React + TypeScript + Vite và tổ chức theo mô hình component, hook và service để tách rõ UI, logic trạng thái và gọi API.
 
-## 🚀 Quick Start
+## Mục tiêu của thư mục này
 
-### Option 1: Docker (Recommended)
+- Cung cấp UI cho đăng nhập/đăng ký.
+- Hiển thị dashboard, tài liệu, chat AI, nhóm, tin nhắn, hồ sơ và trang quản trị.
+- Làm lớp tương tác với backend qua các service có token refresh.
+- Xử lý hiển thị nội dung rich text, markdown, công thức, bảng và preview file.
 
-From project root:
-```bash
-docker compose up -d
+## Cấu trúc chính
+
+```text
+frontend/
+├── public/              # Tài nguyên tĩnh
+├── src/
+│   ├── components/     # Component tái sử dụng và các trang
+│   ├── hooks/          # Custom hooks cho auth, chat, documents, groups
+│   ├── lib/            # Helper/context
+│   ├── services/       # Lớp gọi API
+│   ├── types/          # Kiểu TypeScript dùng chung
+│   ├── utils/          # Hàm tiện ích
+│   ├── App.tsx         # Root component
+│   ├── main.tsx        # Entry React
+│   └── routes.tsx      # Khai báo route
+├── index.html
+├── package.json
+├── vite.config.ts
+├── tailwind.config.js
+├── postcss.config.js
+├── eslint.config.js
+└── README.md
 ```
 
-Access at: http://localhost:5173
+## Các phần quan trọng trong `src/`
 
-### Option 2: Local Development
+### `components/`
+
+Nơi chứa toàn bộ UI chính:
+
+- `pages/`: các trang như login, dashboard, documents, ai-chat, groups, messages, profile, settings, admin.
+- `ui/`: component nền tảng kiểu shadcn/ui.
+- `app-shell.tsx` và `app-sidebar.tsx`: khung ứng dụng và điều hướng.
+- `markdown-message.tsx`: render nội dung chat markdown.
+- `file-preview-modal.tsx`: preview tài liệu và file đính kèm.
+- `theme-provider.tsx`: quản lý theme.
+
+### `hooks/`
+
+Các hook đóng gói logic trạng thái:
+
+- `use-auth.ts`: đăng nhập, đăng ký, xác thực.
+- `use-documents.ts`: tải lên và quản lý tài liệu.
+- `use-chat.ts`: luồng chat, gửi câu hỏi, nhận trả lời.
+- `use-groups.ts`: quản lý nhóm.
+- `use-mobile.tsx`, `use-toast.ts`: tiện ích UI.
+
+### `services/`
+
+Lớp giao tiếp API:
+
+- `api.ts`: client gốc, xử lý token và refresh.
+- `auth.service.ts`: API auth.
+- `document.service.ts`: API tài liệu.
+- `chat.service.ts`: API chat.
+- `group.service.ts`, `messaging.service.ts`, `user.service.ts`, `admin.service.ts`.
+
+### `utils/`
+
+Các hàm hỗ trợ như format, JWT, crop ảnh và user helpers.
+
+## Tech stack
+
+- React 19
+- TypeScript
+- Vite 7
+- Tailwind CSS
+- shadcn/ui + Radix UI
+- React Router
+- React Hook Form + Zod
+- `react-markdown`, `remark-gfm`, `remark-math`, `rehype-katex`
+
+## Scripts
 
 ```bash
-# Install dependencies
-npm install
-
-# Copy .env.example to .env
-cp .env.example .env
-
-# Start dev server
 npm run dev
+npm run build
+npm run preview
+npm run lint
 ```
 
-Access at: http://localhost:5173
-
-## 🛠️ Tech Stack
-
-- **Framework:** React 19
-- **Build Tool:** Vite 7  
-- **Language:** TypeScript
-- **Styling:** Tailwind CSS
-- **UI Components:** shadcn/ui (Radix UI)
-- **State Management:** React Context API
-- **HTTP Client:** Fetch API with auto token refresh
-
-## 📁 Project Structure
-
-```
-src/
-├── components/      # UI Components
-│   ├── pages/      # Page components (Login, Dashboard, etc.)
-│   └── ui/         # Reusable UI components (shadcn/ui)
-├── hooks/          # Custom React hooks
-│   ├── use-auth.ts        # Authentication hooks
-│   ├── use-documents.ts   # Document management
-│   ├── use-chat.ts        # Chat functionality
-│   └── use-groups.ts      # Group management
-├── services/       # API service layer
-│   ├── api.ts             # Base API client
-│   ├── auth.service.ts    # Auth APIs
-│   ├── document.service.ts # Document APIs
-│   ├── chat.service.ts    # Chat APIs
-│   └── group.service.ts   # Group APIs
-├── types/          # TypeScript types
-├── lib/            # Utilities & contexts
-└── App.tsx         # Main app component
-```
-
-## 🔧 Available Scripts
-
-```bash
-npm run dev      # Start dev server (http://localhost:5173)
-npm run build    # Build for production
-npm run preview  # Preview production build
-npm run lint     # Run ESLint
-```
-
-## 🌐 Environment Variables
-
-Create a `.env` file:
+## Biến môi trường
 
 ```env
 VITE_API_BASE_URL=http://localhost:8000
 ```
 
-## 📚 Key Features
+## Chạy local
 
-- ✅ Authentication (Login/Register with JWT)
-- ✅ Auto token refresh
-- ✅ Document upload & management
-- ✅ AI Chat with RAG
-- ✅ Group management
-- ✅ Responsive design (mobile-friendly)
-- ✅ Dark/Light theme support
-- ✅ Real-time form validation
+### Cách 1: Docker Compose
 
-## 🐳 Docker
+Từ thư mục gốc dự án:
 
-The frontend is containerized and runs with Docker Compose.
+```powershell
+docker compose up -d
+```
 
-**Dockerfile features:**
-- Node.js 20 Alpine
-- Hot reload enabled (file watching with polling)
-- Volume mounting for development
-- Exposed on port 5173
+### Cách 2: chạy trực tiếp
 
-**Docker commands:**
 ```bash
-# Build and start
-docker compose up -d frontend
-
-# View logs
-docker compose logs -f frontend
-
-# Restart
-docker compose restart frontend
-
-# Rebuild
-docker compose up -d --build frontend
+npm install
+npm run dev
 ```
 
-## 🔥 Development Tips
+Mặc định frontend chạy ở `http://localhost:5173`.
 
-### Hot Reload
-Vite HMR (Hot Module Replacement) works automatically. Changes are reflected instantly in the browser.
+## Những gì giao diện đang hỗ trợ
 
-### API Integration
-All API calls go through the `api.ts` service which handles:
-- Automatic Bearer token injection
-- Token refresh on 401 errors
-- Request queueing during token refresh
-- Error handling
+- Đăng nhập/đăng ký và quản lý session.
+- Upload và xem tài liệu.
+- Chat AI theo ngữ cảnh tài liệu.
+- Nhóm và nhắn tin.
+- Trang hồ sơ và cài đặt.
+- Trang admin khi có quyền phù hợp.
 
-### Adding New Pages
-1. Create component in `src/components/pages/`
-2. Add route in `app-shell.tsx`
-3. Add navigation item in `app-sidebar.tsx`
+## Lưu ý khi phát triển
 
-### Using API Services
-```typescript
-import { useDocuments } from '@/hooks/use-documents'
-
-function MyComponent() {
-  const { documents, loading, uploadDocument } = useDocuments()
-  
-  // Use documents, uploadDocument, etc.
-}
-```
-
-## 📖 Documentation
-
-- [INTEGRATION_REPORT.md](../INTEGRATION_REPORT.md) - Frontend-Backend integration details
-- [INTEGRATION_GUIDE.md](../INTEGRATION_GUIDE.md) - API usage guide
-
----
-
-## Original Vite Template Info
-
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
-
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## React Compiler
-
-The React Compiler is currently not compatible with SWC. See [this issue](https://github.com/vitejs/vite-plugin-react/issues/428) for tracking the progress.
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+- Mọi request API nên đi qua lớp service thay vì gọi trực tiếp từ component.
+- Khi thêm page mới, cập nhật cả route lẫn navigation.
+- File preview và markdown rendering đã có các xử lý riêng cho nội dung dài, code block, công thức và bảng.
+- Với production build, cần đảm bảo `VITE_API_BASE_URL` trỏ đúng backend thật.

@@ -253,7 +253,7 @@ export function MarkdownMessage({ content, role, docMap }: MarkdownMessageProps)
 
   // User messages don't need markdown rendering
   if (role === 'user') {
-    return <p className="whitespace-pre-wrap text-sm">{content}</p>
+    return <p className="whitespace-pre-wrap break-words text-sm">{content}</p>
   }
 
   // Preprocess citations to add clickable links
@@ -272,7 +272,7 @@ export function MarkdownMessage({ content, role, docMap }: MarkdownMessageProps)
 
   // Assistant messages with markdown rendering
   return (
-    <div className="prose prose-sm min-w-0 max-w-none overflow-hidden break-words dark:prose-invert [&_.katex-display]:max-w-full [&_.katex-display]:overflow-x-auto [&_a]:break-all [&_code]:break-all [&_code]:whitespace-pre-wrap [&_li]:break-words [&_p]:break-words [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:max-w-full">
+    <div className="prose prose-sm min-w-0 max-w-none break-words dark:prose-invert [&_.katex-display]:max-w-full [&_.katex-display]:overflow-x-auto [&_a]:break-all [&_code]:break-all [&_code]:whitespace-pre-wrap [&_li]:break-words [&_p]:break-words [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:max-w-full">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}

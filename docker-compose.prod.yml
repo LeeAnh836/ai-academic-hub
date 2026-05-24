@@ -93,6 +93,7 @@ services:
     build:
       context: ./ai-service
       dockerfile: Dockerfile.prod
+    image: jvb_ai_service_prod
     container_name: jvb_ai_service_prod
     restart: unless-stopped
     ports:

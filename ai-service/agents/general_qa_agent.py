@@ -4,6 +4,7 @@ Handles general questions with tool support (future: MCP integration)
 """
 from typing import Dict, Any, List, Optional
 import logging
+import re
 
 from agents import BaseAgent
 from core.config import settings
@@ -172,24 +173,145 @@ class GeneralQAAgent(BaseAgent):
         Returns:
             Tool name or None
         """
-        query_lower = query.lower()
+        query_lower = (query or "").lower()
         
-        # Calculator tool
-        calc_keywords = ["tính", "calculate", "+", "-", "*", "/", "=", "phương trình"]
-        if any(kw in query_lower for kw in calc_keywords):
+        # Weather queries should use Google Search grounding
+        if self._is_weather_query(query_lower):
+            return "weather"
+
+        # Time-sensitive info (price/news/market) should use Google Search grounding
+        if self._needs_google_search(query_lower):
+            return "web_search"
+
+        # Calculator tool (only for real math expressions, not dates/codes)
+        if self._looks_like_math_expression(query_lower):
             return "calculator"
         
-        # Web search tool (placeholder - will use MCP)
-        search_keywords = ["giá", "price", "tin tức", "news", "hiện tại", "current"]
-        if any(kw in query_lower for kw in search_keywords):
-            return "web_search"
-        
-        # Weather tool (placeholder - will use MCP)
-        weather_keywords = ["thời tiết", "weather", "nhiệt độ", "temperature"]
-        if any(kw in query_lower for kw in weather_keywords):
-            return "weather"
-        
         return None
+
+    def _looks_like_math_expression(self, query_lower: str) -> bool:
+        if not query_lower:
+            return False
+        if not any(ch.isdigit() for ch in query_lower):
+            return False
+
+        # Exclude dates and document codes
+        if self._looks_like_date(query_lower) or self._looks_like_doc_code(query_lower):
+            return False
+
+        # Require at least two numbers with a math operator between them
+        expr_pattern = r"\b\d+(?:[\.,]\d+)?\s*[+\-*/^]\s*\d+(?:[\.,]\d+)?\b"
+        if re.search(expr_pattern, query_lower):
+            return True
+
+        calc_markers = ["tính", "calculate", "solve", "phương trình", "equation"]
+        if any(m in query_lower for m in calc_markers):
+            return True
+
+        return False
+
+    def _looks_like_date(self, query_lower: str) -> bool:
+        date_patterns = [
+            r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b",
+            r"\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b",
+            r"\bng[aà]y\s+\d{1,2}\s+th[aá]ng\s+\d{1,2}\s+n[aă]m\s+\d{2,4}\b",
+        ]
+        return any(re.search(pat, query_lower) for pat in date_patterns)
+
+    def _looks_like_doc_code(self, query_lower: str) -> bool:
+        return bool(re.search(r"\b\d{1,4}/[a-zA-ZÀ-Ỹ0-9-]{2,}\b", query_lower))
+
+    def _looks_like_official_doc_query(self, query_lower: str) -> bool:
+        doc_keywords = [
+            "công điện", "cong dien",
+            "nghị định", "nghi dinh",
+            "thông tư", "thong tu",
+            "quyết định", "quyet dinh",
+            "chỉ thị", "chi thi",
+            "công văn", "cong van",
+            "nghị quyết", "nghi quyet",
+            "văn bản", "van ban",
+            "luật", "luat",
+        ]
+        if any(k in query_lower for k in doc_keywords):
+            return True
+        return self._looks_like_doc_code(query_lower)
+
+    def _looks_like_sports_query(self, query_lower: str) -> bool:
+        sports_keywords = [
+            "tỷ số", "ty so",
+            "kết quả", "ket qua",
+            "trận", "tran",
+            "derby", "vs", "đối đầu", "doi dau",
+            "giành chiến thắng", "chien thang",
+            "thắng", "thang",
+            "bóng đá", "bong da",
+        ]
+        return any(k in query_lower for k in sports_keywords)
+
+    def _is_weather_query(self, query_lower: str) -> bool:
+        weather_keywords = [
+            "thời tiết", "thoi tiet", "weather",
+            "nhiệt độ", "nhiet do", "temperature",
+            "dự báo", "du bao", "forecast",
+            "mưa", "mua", "nắng", "nang",
+            "độ ẩm", "do am", "gió", "gio",
+        ]
+        return any(kw in query_lower for kw in weather_keywords)
+
+    def _needs_google_search(self, query_lower: str) -> bool:
+        if not query_lower:
+            return False
+
+        # Explicit dates often imply time-sensitive or event-specific lookup
+        if self._looks_like_date(query_lower):
+            return True
+
+        # Official documents/news should be searched
+        if self._looks_like_official_doc_query(query_lower):
+            return True
+
+        # Sports results and event outcomes
+        if self._looks_like_sports_query(query_lower):
+            return True
+
+        price_targets = [
+            "vàng", "vang", "tỷ giá", "ty gia", "usd", "đô", "do la",
+            "dollar", "vnd", "bitcoin", "btc", "eth", "crypto",
+            "chứng khoán", "chung khoan", "cổ phiếu", "co phieu",
+            "xăng", "xang", "dầu", "dau", "lãi suất", "lai suat",
+            "bất động sản", "bat dong san",
+        ]
+        news_markers = [
+            "tin tức", "tin tuc", "news", "mới nhất", "moi nhat",
+            "latest", "breaking", "trực tiếp", "truc tiep", "live",
+            "vừa ký", "vua ky", "mới ký", "moi ky",
+            "vừa ban hành", "vua ban hanh", "mới ban hành", "moi ban hanh",
+        ]
+        time_markers = [
+            "hôm nay", "hom nay", "hiện nay", "hien nay",
+            "hiện tại", "hien tai", "bây giờ", "bay gio",
+            "current", "today", "now", "real-time", "real time",
+        ]
+
+        if "tỷ giá" in query_lower or "ty gia" in query_lower:
+            return True
+
+        if any(marker in query_lower for marker in news_markers):
+            return True
+
+        if "giá" in query_lower or "gia" in query_lower or "price" in query_lower:
+            if any(target in query_lower for target in price_targets):
+                return True
+            if any(marker in query_lower for marker in time_markers):
+                return True
+
+        if any(marker in query_lower for marker in time_markers) and any(
+            target in query_lower for target in price_targets
+        ):
+            return True
+
+        return False
 
     def _should_use_computation_pipeline(self, query: str) -> bool:
         """
@@ -233,6 +355,9 @@ class GeneralQAAgent(BaseAgent):
         Answer question using tools
         """
         try:
+            if tool_name in {"web_search", "weather"}:
+                return await self._answer_with_google_search(query, complexity)
+
             # Get tool function
             tool_func = self.tools.get(tool_name)
             
@@ -241,6 +366,12 @@ class GeneralQAAgent(BaseAgent):
             
             # Execute tool
             tool_result = await tool_func(query)
+
+            if tool_name == "calculator" and not tool_result.get("success"):
+                err = (tool_result.get("error") or "").lower()
+                if any(token in err for token in ["leading zeros", "invalid syntax", "not_math_expression"]):
+                    logger.info("↩️ Calculator parse error → fallback to direct QA")
+                    return await self._answer_direct(query, complexity)
             
             # Generate answer with tool result (pass complexity)
             return await self._integrate_tool_result(query, tool_result, complexity)
@@ -248,6 +379,60 @@ class GeneralQAAgent(BaseAgent):
         except Exception as e:
             logger.error(f"❌ Tool execution error: {e}")
             return await self._answer_direct(query)
+
+    async def _answer_with_google_search(self, query: str, complexity: str = "moderate") -> str:
+        """
+        Answer time-sensitive queries using Gemini Google Search grounding.
+        """
+        try:
+            if not settings.ENABLE_GEMINI_GOOGLE_SEARCH:
+                logger.info("Google Search grounding disabled by config → direct QA")
+                return await self._answer_direct(query, complexity)
+
+            # Analyze complexity if not provided
+            if not complexity:
+                complexity = complexity_analyzer.analyze(query)
+
+            model_complexity = {
+                "simple": "low",
+                "moderate": "medium",
+                "complex": "high"
+            }.get(complexity, "medium")
+
+            provider_name, model_identifier = self.model_manager.get_model(
+                task_type="direct_chat",
+                complexity=model_complexity,
+                force_provider="gemini",
+            )
+
+            if "gemini" not in provider_name:
+                return (
+                    "Hiện không thể dùng Google Search vì Gemini chưa sẵn sàng "
+                    "(thiếu API key hoặc hết quota). Vui lòng thử lại sau."
+                )
+
+            system_instruction = (
+                "Bạn là trợ lý cung cấp thông tin cập nhật. "
+                "Hãy dùng Google Search khi câu hỏi cần dữ liệu mới nhất "
+                "(giá, thời tiết, tin tức). "
+                "Trả lời ngắn gọn, nêu thời điểm nếu có. "
+                "Nếu không tìm thấy kết quả đáng tin, hãy nói rõ."
+            )
+
+            return self.model_manager.generate_text(
+                provider_name=provider_name,
+                model_identifier=model_identifier,
+                prompt=query,
+                system_instruction=system_instruction,
+                temperature=0.2,
+                max_tokens=2500,
+                enable_fallback=False,
+                enable_google_search=True,
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Google Search grounding error: {e}")
+            return await self._answer_direct(query, complexity)
     
     async def _answer_direct(self, query: str, complexity: str = None, intent: Optional[str] = None, chat_history: Optional[List[Dict]] = None) -> str:
         """
@@ -676,6 +861,13 @@ TRẢ LỜI:"""
         Calculator tool (basic Python eval)
         """
         try:
+            if not self._looks_like_math_expression((query or "").lower()):
+                return {
+                    "tool": "calculator",
+                    "result": "",
+                    "success": False,
+                    "error": "not_math_expression",
+                }
             # Extract math expression (simple approach)
             import re
             

@@ -1,170 +1,105 @@
-# AI Agents - Multi-Agent System
+# AI Agents
 
-This folder contains specialized AI agents for different tasks.
+Thư mục này chứa các agent chuyên biệt cho AI Service. Mỗi agent tập trung vào một loại tác vụ để việc điều phối rõ ràng hơn và dễ mở rộng hơn.
 
-## 🤖 Agents
+## Vai trò chung
 
-### Base Agent (`__init__.py`)
-Abstract base class for all agents
-- Provides common functionality
-- Memory management
-- State persistence
-- Logging
+- Chuẩn hóa cách xử lý từng kiểu truy vấn.
+- Tận dụng memory và ngữ cảnh hội thoại.
+- Tách logic xử lý tài liệu, phân tích dữ liệu và QA tổng quát.
+- Cho phép mở rộng thêm agent mới mà không làm phình orchestration chính.
 
-### Prompt Preprocessor (`prompt_preprocessor.py`)
-Resolves ambiguous queries using conversation memory
+## Các agent hiện có
 
-**Examples:**
-- "có" → "Có, tôi muốn phân tích dữ liệu"
-- "được" → "Được, hãy tạo biểu đồ"
-- "ok" → "OK, thực hiện phân tích"
+### `__init__.py`
 
-**Features:**
-- Detects ambiguous keywords
-- Looks up conversation history
-- Enriches query with context
+Đóng vai trò nền tảng chung cho agent, bao gồm lớp cơ sở, state và các tiện ích chung.
 
-### Document QA Agent (`document_qa_agent.py`)
-Handles document-based Q&A using RAG
+### `prompt_preprocessor.py`
 
-**Capabilities:**
-- Semantic search in Qdrant
-- Context retrieval
-- Answer generation with sources
-- Fallback retrieval strategy
+Tiền xử lý câu hỏi trước khi đưa vào classifier hoặc orchestrator.
 
-**Use Cases:**
-- "Theo tài liệu, Docker là gì?"
-- "Tóm tắt file PDF này"
-- "Tạo câu hỏi từ tài liệu"
+Chức năng chính:
 
-### Data Analysis Agent (`data_analysis_agent.py`)
-Analyzes CSV/Excel files with pandas code generation
+- làm rõ câu trả lời ngắn, mơ hồ hoặc phụ thuộc ngữ cảnh.
+- tận dụng lịch sử hội thoại để bổ sung ý định.
+- chuẩn hóa prompt cho các bước phía sau.
 
-**Workflow:**
-1. Load data file
-2. Understand structure
-3. Generate pandas code with LLM
-4. Execute code in Docker
-5. Return results + code
+### `document_qa_agent.py`
 
-**Use Cases:**
-- "Phân tích doanh thu theo tháng"
-- "Tính trung bình của cột revenue"
-- "Tạo biểu đồ từ dữ liệu"
+Agent hỏi đáp theo tài liệu.
 
-### General QA Agent (`general_qa_agent.py`)
-General question answering with tool support
+Nhiệm vụ:
 
-**Capabilities:**
-- Direct LLM responses
-- Tool integration (calculator, web search, weather)
-- MCP protocol support (future)
+- truy xuất context từ Qdrant.
+- tổng hợp câu trả lời có dẫn nguồn.
+- có cơ chế fallback khi semantic search không đủ dữ liệu.
+- phù hợp với các truy vấn như tóm tắt, giải thích, trích dẫn tài liệu.
 
-**Use Cases:**
-- "Giải phương trình x^2 + 2x + 1 = 0"
-- "Viết code Python sắp xếp mảng"
-- "Giải thích khái niệm OOP"
+### `data_analysis_agent.py`
 
-### Code Executor (`code_executor.py`)
-Safe Python code execution in Docker containers
+Agent phân tích dữ liệu CSV/Excel.
 
-**Features:**
-- Isolated execution environment
-- Memory limit (512MB)
-- Network disabled
-- Timeout protection
-- Output size limit
+Luồng thường dùng:
 
-**Security:**
-- No network access
-- Resource limits
-- Container auto-removal
+1. đọc dữ liệu.
+2. hiểu cấu trúc bảng.
+3. tạo pandas code.
+4. chạy code trong môi trường cô lập.
+5. trả kết quả và code sinh ra.
 
-## 🔄 Agent Workflow
+### `general_qa_agent.py`
 
-```
-User Query
-    ↓
-[Prompt Preprocessor]
-    ↓ (enriched query)
-[Intent Classifier]
-    ↓ (intent)
-[Master Orchestrator]
-    ↓ (routes to agent)
-[Specialized Agent]
-    ↓ (executes task)
-[Memory Manager]
-    ↑ (saves context)
-Response
+Agent trả lời câu hỏi tổng quát.
+
+Nó phù hợp cho:
+
+- giải thích khái niệm.
+- trả lời kiến thức chung.
+- kết hợp các tool phụ trợ khi cần.
+
+### `code_executor.py`
+
+Thành phần thực thi code Python an toàn trong container.
+
+Đặc điểm:
+
+- môi trường cô lập.
+- giới hạn tài nguyên.
+- có timeout.
+- không cho phép network truy cập trực tiếp.
+
+## Luồng xử lý điển hình
+
+```text
+User query
+  -> Prompt preprocessor
+  -> Intent/classification layer
+  -> Master orchestrator
+  -> Specialized agent
+  -> Memory update
+  -> Response
 ```
 
-## 🧠 Memory Integration
+## Memory và state
 
-All agents have access to Memory Manager:
-- Save/load agent state
-- Access conversation history
-- Store/retrieve context variables
+Các agent đều có thể đọc/ghi memory để:
 
-**Example:**
-```python
-# In any agent
-self.save_state(user_id, session_id, {
-    "last_action": "data_analysis",
-    "last_file": "sales.csv"
-})
+- lưu trạng thái phiên làm việc.
+- nhớ file hoặc task gần nhất.
+- phục hồi ngữ cảnh khi người dùng hỏi tiếp.
 
-state = self.load_state(user_id, session_id)
-```
+## Khi muốn thêm agent mới
 
-## 🎯 Adding New Agent
+1. Tạo file agent mới trong thư mục này.
+2. Kế thừa lớp base hoặc pattern chung hiện có.
+3. Đăng ký agent trong orchestrator chính.
+4. Thêm logic intent/classification nếu cần.
+5. Cập nhật router hoặc endpoint tương ứng trong AI Service.
 
-1. Create new file: `agents/my_agent.py`
-2. Inherit from BaseAgent:
-```python
-from agents import BaseAgent
+## Tài liệu liên quan
 
-class MyAgent(BaseAgent):
-    def __init__(self):
-        super().__init__(
-            agent_name="my_agent",
-            description="Agent description"
-        )
-    
-    async def execute(self, query, user_id, session_id, context):
-        # Agent logic here
-        return {
-            "answer": "...",
-            "metadata": {}
-        }
-```
-
-3. Register in Master Orchestrator:
-```python
-self.agents = {
-    "my_agent": my_agent,
-    ...
-}
-```
-
-4. Add intent in Intent Classifier:
-```python
-INTENTS = {
-    "my_intent": {
-        "keywords": [...],
-        ...
-    }
-}
-```
-
-5. Add routing logic in Orchestrator:
-```python
-if intent == "my_intent":
-    result = await my_agent.execute(...)
-```
-
-## 📚 Learn More
-
-- See `MULTI_AGENT_SETUP.md` for full setup guide
-- See `services/master_orchestrator.py` for orchestration logic
-- See `routers/agent.py` for API endpoints
+- `services/master_orchestrator.py`
+- `services/orchestrator.py`
+- `services/intent_classifier.py`
+- `routers/agent.py`

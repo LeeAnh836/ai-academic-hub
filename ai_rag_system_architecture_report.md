@@ -16,7 +16,6 @@ Hạ tầng chạy qua docker-compose gồm:
 - Redis cho token blacklist và cache helper LLM
 - MinIO cho file gốc dạng object storage
 - Qdrant cho vector retrieval
-- Neo4j là tùy chọn khi bật GraphRAG
 
 ## Lõi mô hình trong AI Service
 
@@ -208,11 +207,10 @@ B. Nhánh QA thông thường
 - CRAG đánh giá đủ ngữ cảnh hay không.
 - Nếu insufficient thì tạo corrective query và truy xuất lại theo ngưỡng linh hoạt.
 - Nếu query đủ điều kiện multi-hop thì decomposition thành sub-queries rồi tổng hợp.
-3. Nếu Advanced RAG không dùng nhưng GraphRAG bật thì chạy Hybrid RAG (vector + graph).
-4. Nếu cả hai không dùng thì vector-only retrieval trên Qdrant.
-5. Nếu semantic retrieval rỗng mà query là dạng tham chiếu file này/hình này, bật reference fallback bằng scroll chunk đầu từ tài liệu đã chọn.
-6. Sinh câu trả lời grounding chặt với context + history + summary + source metadata.
-7. Tạo doc_map theo nhãn file_name | id:8 ký tự để frontend map citation chính xác khi trùng tên file.
+3. Nếu Advanced RAG không dùng thì vector-only retrieval trên Qdrant.
+4. Nếu semantic retrieval rỗng mà query là dạng tham chiếu file này/hình này, bật reference fallback bằng scroll chunk đầu từ tài liệu đã chọn.
+5. Sinh câu trả lời grounding chặt với context + history + summary + source metadata.
+6. Tạo doc_map theo nhãn file_name | id:8 ký tự để frontend map citation chính xác khi trùng tên file.
 
 ### Bước 6: Persist kết quả và trả về UI
 
@@ -256,10 +254,6 @@ Mongo cũng giữ active_source_ids, source catalog, và quan hệ giữa messag
 - Token blacklist cho auth backend.
 - LLM helper cache (intent/query rewrite/CRAG...) ở AI Service.
 
-### Neo4j (tùy chọn)
-
-Khi bật GraphRAG + Neo4j, hệ thống index Document/Chunk/Entity và quan hệ để phục vụ retrieval theo tri thức đồ thị.
-
 ## Cơ chế fallback và chống gián đoạn vận hành
 
 Hệ thống có nhiều lớp fallback nối tiếp:
@@ -279,7 +273,6 @@ Hệ thống có nhiều lớp fallback nối tiếp:
 - ENABLE_ADVANCED_RAG (mặc định bật)
 - ENABLE_QUERY_REWRITING, ENABLE_BM25_RESCORING, ENABLE_RERANKING, ENABLE_CORRECTIVE_RAG
 - ENABLE_MULTI_HOP
-- ENABLE_GRAPH_RAG và ENABLE_NEO4J
 - CHUNK_SIZE=1000, CHUNK_OVERLAP=200
 - RAG_TOP_K, RAG_SCORE_THRESHOLD, RAG_MIN_SCORE_THRESHOLD
 - ENABLE_MULTI_AGENT, ENABLE_PROMPT_PREPROCESSING

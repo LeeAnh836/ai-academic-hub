@@ -503,8 +503,13 @@ class MasterOrchestrator:
         explicit_doc_markers = [
             "theo tai lieu", "theo tài liệu",
             "trong file", "trong tai lieu", "trong tài liệu",
+            "trong hình", "trong hinh", "trong ảnh", "trong anh",
+            "trong hình ảnh", "trong hinh anh",
+            "theo hình", "theo hinh", "theo ảnh", "theo anh",
+            "theo hình ảnh", "theo hinh anh",
             "file nay", "file này", "tai lieu nay", "tài liệu này",
             "hinh nay", "hình này", "anh nay", "ảnh này",
+            "hinh anh tren", "hình ảnh trên", "hinh tren", "hình trên", "anh tren", "ảnh trên",
             "this file", "this document", "this image", "attached file",
         ]
         if any(marker in query_lower for marker in explicit_doc_markers):
@@ -535,42 +540,6 @@ class MasterOrchestrator:
         document_ids: Optional[List[str]],
     ) -> bool:
         if not query or not user_id or not document_ids:
-            return False
-
-    def _has_tabular_data_file(self, context: Dict[str, Any]) -> bool:
-        """
-        Determine whether the current context actually contains a tabular data file
-        suitable for `data_analysis_agent` (CSV/XLSX). This prevents misrouting when
-        some upstream layer always attaches file_data regardless of type.
-        """
-        try:
-            file_name = (context.get("file_name") or "").lower().strip()
-            file_path = (context.get("file_path") or "").lower().strip()
-
-            # Most reliable: filename/path extension
-            for candidate in (file_name, file_path):
-                if candidate.endswith(".csv") or candidate.endswith(".xlsx") or candidate.endswith(".xls"):
-                    return True
-
-            # If backend passes source metadata, use mime/file hints
-            source_metadata = context.get("source_metadata") or []
-            for src in source_metadata:
-                mime = (src.get("mime_type") or "").lower()
-                name = (src.get("file_name") or "").lower()
-                if mime in {
-                    "text/csv",
-                    "application/csv",
-                    "application/vnd.ms-excel",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                }:
-                    return True
-                if name.endswith(".csv") or name.endswith(".xlsx") or name.endswith(".xls"):
-                    return True
-
-            # If we only have raw bytes but no type hints, treat as NOT tabular
-            # to avoid false positives (e.g. images/docs).
-            return False
-        except Exception:
             return False
 
         try:
@@ -615,6 +584,42 @@ class MasterOrchestrator:
 
         except Exception as e:
             logger.warning(f"⚠️ Retrieval grounding check failed: {e}")
+            return False
+
+    def _has_tabular_data_file(self, context: Dict[str, Any]) -> bool:
+        """
+        Determine whether the current context actually contains a tabular data file
+        suitable for `data_analysis_agent` (CSV/XLSX). This prevents misrouting when
+        some upstream layer always attaches file_data regardless of type.
+        """
+        try:
+            file_name = (context.get("file_name") or "").lower().strip()
+            file_path = (context.get("file_path") or "").lower().strip()
+
+            # Most reliable: filename/path extension
+            for candidate in (file_name, file_path):
+                if candidate.endswith(".csv") or candidate.endswith(".xlsx") or candidate.endswith(".xls"):
+                    return True
+
+            # If backend passes source metadata, use mime/file hints
+            source_metadata = context.get("source_metadata") or []
+            for src in source_metadata:
+                mime = (src.get("mime_type") or "").lower()
+                name = (src.get("file_name") or "").lower()
+                if mime in {
+                    "text/csv",
+                    "application/csv",
+                    "application/vnd.ms-excel",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                }:
+                    return True
+                if name.endswith(".csv") or name.endswith(".xlsx") or name.endswith(".xls"):
+                    return True
+
+            # If we only have raw bytes but no type hints, treat as NOT tabular
+            # to avoid false positives (e.g. images/docs).
+            return False
+        except Exception:
             return False
 
     def _is_summarization_query(self, query: str) -> bool:

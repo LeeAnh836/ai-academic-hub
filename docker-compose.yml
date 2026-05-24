@@ -87,6 +87,7 @@ services:
     build:
       context: ./ai-service
       dockerfile: Dockerfile
+    image: jvb_ai_service
     container_name: jvb_ai_service
     command: uvicorn main:app --host 0.0.0.0 --port 8001 --reload
     ports:
@@ -96,6 +97,7 @@ services:
     volumes:
       - ./ai-service:/app
       - /var/run/docker.sock:/var/run/docker.sock  # For code execution
+      - code_exec_data:/code_exec
     depends_on:
       qdrant:
         condition: service_started
@@ -162,6 +164,8 @@ volumes:
   mongo_data:
   minio_data:
   qdrant_data:
+  code_exec_data:
+    name: code_exec_data
 
 networks:
   jvb_network:

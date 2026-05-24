@@ -9,7 +9,6 @@ import re
 
 from agents import BaseAgent
 from services.embedding_service import embedding_service
-from services.hybrid_rag_service import hybrid_rag_service
 from services.advanced_rag_service import advanced_rag_service
 from services.corrective_rag import corrective_rag
 from services.computation_pipeline import computation_pipeline
@@ -144,7 +143,7 @@ class DocumentQAAgent(BaseAgent):
                 }
 
             # ── Computation / Analysis pipeline ───────────────────────
-            if intent in {"computation", "analysis"}:
+            if intent == "computation":
                 logger.info(f"🧮 Using computation pipeline for intent={intent}")
                 comp_result = computation_pipeline.run(
                     query=query,
@@ -160,9 +159,7 @@ class DocumentQAAgent(BaseAgent):
                     "metadata": {
                         "model": "tool+llm",
                         "contexts_count": len(contexts),
-                        "retrieval_mode": "advanced_rag" if settings.ENABLE_ADVANCED_RAG else (
-                            "hybrid" if settings.ENABLE_GRAPH_RAG else "vector_only"
-                        ),
+                        "retrieval_mode": "advanced_rag" if settings.ENABLE_ADVANCED_RAG else "vector_only",
                         "pipeline": {
                             "retrieval": pipeline_meta,
                             **(comp_result.get("metadata") or {})
@@ -193,8 +190,6 @@ class DocumentQAAgent(BaseAgent):
             # Determine retrieval mode label
             if settings.ENABLE_ADVANCED_RAG:
                 retrieval_mode = "advanced_rag"
-            elif settings.ENABLE_GRAPH_RAG:
-                retrieval_mode = "hybrid"
             else:
                 retrieval_mode = "vector_only"
             
@@ -236,11 +231,10 @@ class DocumentQAAgent(BaseAgent):
         complexity: str = "moderate"
     ) -> tuple:
         """
-        Retrieve relevant contexts using the best available strategy:
-        1. Advanced RAG (ENABLE_ADVANCED_RAG=True): Full pipeline with query expansion,
-           BM25 rescoring, re-ranking, CRAG, and multi-hop reasoning
-        2. Hybrid RAG (ENABLE_GRAPH_RAG=True): Vector + Graph (Neo4j) retrieval
-        3. Vector-only: Direct Qdrant similarity search (fallback)
+          Retrieve relevant contexts using the best available strategy:
+          1. Advanced RAG (ENABLE_ADVANCED_RAG=True): Full pipeline with query expansion,
+              BM25 rescoring, re-ranking, CRAG, and multi-hop reasoning
+          2. Vector-only: Direct Qdrant similarity search (fallback)
 
         Returns:
             Tuple of (contexts, pipeline_metadata)
@@ -272,22 +266,6 @@ class DocumentQAAgent(BaseAgent):
             except Exception as e:
                 logger.warning(f"⚠️ Advanced RAG failed, falling back: {e}")
                 # Fall through to next strategy
-
-        # ── Hybrid path (Qdrant + Neo4j) ────────────────────────────────
-        if settings.ENABLE_GRAPH_RAG:
-            try:
-                contexts = await hybrid_rag_service.hybrid_retrieve(
-                    query=query,
-                    user_id=user_id,
-                    document_ids=document_ids,
-                    top_k=top_k,
-                    score_threshold=score_threshold
-                )
-                logger.info(f"🔀 Hybrid RAG retrieved {len(contexts)} contexts")
-                return contexts, {"pipeline": "hybrid_rag"}
-            except Exception as e:
-                logger.warning(f"⚠️ Hybrid RAG failed, falling back to vector-only: {e}")
-                # Fall through to vector-only path below
 
         # ── Vector-only path (Qdrant direct) ────────────────────────────
         try:
@@ -360,6 +338,11 @@ class DocumentQAAgent(BaseAgent):
         explicit_markers = [
             "file này", "file nay", "tài liệu này", "tai lieu nay",
             "ảnh này", "anh nay", "hình này", "hinh nay",
+            "trong hình", "trong hinh", "trong ảnh", "trong anh",
+            "trong hình ảnh", "trong hinh anh",
+            "theo hình", "theo hinh", "theo ảnh", "theo anh",
+            "theo hình ảnh", "theo hinh anh",
+            "hình ảnh trên", "hinh anh tren", "hình trên", "hinh tren", "ảnh trên", "anh tren",
             "this file", "this document", "this image", "attached file",
         ]
         if any(marker in query_lower for marker in explicit_markers):
